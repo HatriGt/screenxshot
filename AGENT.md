@@ -19,31 +19,59 @@ It is comparable to tools like CleanShot X, Shots, or Ray.so's screenshot mode.
 - **Repo / codename:** screenxshot
 - **Status:** Early stage — everything lives in a single HTML file.
 
+## Tech stack
+
+Migrated from a single `prism.html` file to a **React + Vite + TanStack** app,
+preserving the original look and functionality 100%.
+
+- **Vite** — dev server and build (`npm run dev` / `npm run build`).
+- **React 18** — UI components.
+- **TanStack Router** — routing (single `/` route today; file/code-based tree
+  ready for more pages).
+- **TanStack Store** (`@tanstack/react-store`) — reactive editor settings +
+  derived UI flags that drive the dock/panel active states.
+- Fonts: Google Fonts (Manrope + JetBrains Mono) via `<link>` in `index.html`.
+
 ## Repository layout
 
 ```
 .
-├── prism.html   # The ENTIRE application (HTML + CSS + vanilla JS, ~754 lines)
-└── README.md    # One-line placeholder
+├── index.html              # Vite entry, font links, #root mount
+├── vite.config.js
+├── package.json
+├── src/
+│   ├── main.jsx            # React root + RouterProvider
+│   ├── router.jsx          # TanStack Router setup
+│   ├── styles.css          # Full stylesheet (ported verbatim from prism.html)
+│   ├── routes/HomePage.jsx # Landing page: Header/Hero/Studio/Caps/Footer
+│   ├── components/         # Header, Hero, Studio, Dock, Panel, Caps, Footer
+│   ├── hooks/              # useReveal (scroll-reveal), useParallax (hero)
+│   └── editor/
+│       ├── data.js         # WALLS / GRADS / SOLIDS / COLORS / SIZE / TSIZE (verbatim)
+│       ├── store.js        # TanStack Store: settings + derived flags
+│       ├── engine.js       # Canvas engine (drawing math ported verbatim)
+│       └── instance.js     # Shared Editor singleton
+└── README.md
 ```
 
-There is **no build step, no package manager, and no dependencies** other than
-Google Fonts (Manrope + JetBrains Mono) loaded via `<link>`. Open `prism.html`
-in a browser and it works.
+The original `prism.html` was removed after parity verification; it remains in
+git history as the reference implementation.
 
-## Architecture (all inside `prism.html`)
+## Architecture
 
-The app is a self-contained landing page whose hero section doubles as a fully
-functional editor embedded in a fake "mac window".
+The app is a landing page whose hero section is followed by a fully functional
+editor embedded in a fake "mac window".
 
-- **`<style>` block** — CSS custom properties (`--paper`, `--accent`, shadows,
+- **`src/styles.css`** — CSS custom properties (`--paper`, `--accent`, shadows,
   fonts), all layout, the dock/panel/window chrome, and animations
-  (`.reveal` scroll-reveal, parallax `.player` layers).
-- **`<script>` block** — two IIFEs:
-  1. Header scroll state + `IntersectionObserver` scroll-reveal + hero parallax.
-  2. The editor engine (`"use strict"`), built on the HTML `<canvas>` API.
+  (`.reveal` scroll-reveal, parallax `.player` layers). Ported unchanged.
+- **`src/editor/engine.js`** — the `Editor` class (canvas `<canvas>` API). React
+  components call its methods; it reads settings from the TanStack store and
+  writes back derived flags (`hasImage`/`canUndo`/`canRedo`/`copyLabel`).
+- **React components** own only the DOM chrome and reflect store state; the
+  drawing math is not re-implemented in React.
 
-### Editor engine key pieces
+### Editor engine key pieces (in `src/editor/engine.js`)
 
 - **State:** a single `state` object (`tool`, `color`, `size`, `frame`,
   `padding`, `srad` (corner radius), `shadow`, `bg`) plus `ops` (annotation
@@ -83,17 +111,20 @@ functional editor embedded in a fake "mac window".
 
 ## How to run
 
-Just open `prism.html` in a modern browser, or serve the folder statically:
-
 ```bash
-python3 -m http.server 8000   # then visit http://localhost:8000/prism.html
+npm install
+npm run dev       # dev server (http://localhost:5173)
+npm run build     # production build → dist/
+npm run preview   # preview the production build
 ```
 
 ## Conventions
 
-- Vanilla JS, no framework. Terse, single-file style — match the surrounding
-  density and naming if editing `prism.html`.
 - Keep the app fully client-side. **Never** add code that uploads the user's
   screenshot anywhere.
 - The visual design system is driven by the CSS custom properties in
-  `:root` — reuse them rather than hard-coding colors.
+  `:root` (`src/styles.css`) — reuse them rather than hard-coding colors.
+- The canvas drawing math in `engine.js` is a faithful port — change it only
+  with a matching parity check (drive the editor and compare exported PNGs).
+- Editor settings flow through the TanStack store (`src/editor/store.js`);
+  add new settings there and read them in the engine.
