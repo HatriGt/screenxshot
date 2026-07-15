@@ -1,0 +1,23 @@
+{
+  "name": "screenxshot",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Prism — every screenshot, instantly beautiful. React + Vite + TanStack.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tanstack/react-router": "^1.58.3",
+    "@tanstack/react-store": "^0.5.5",
+    "@tanstack/store": "^0.5.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.4.2"
+  }
+}
