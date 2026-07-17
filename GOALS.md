@@ -1,12 +1,12 @@
-# Prism — Project Goals
+# ScreenXShot — Project Goals
 
-## What Prism is
+## What ScreenXShot is
 A privacy-first, client-side **screenshot beautifier and annotator**. Drop in a
 screenshot → set it on a beautiful backdrop, wrap it in a clean macOS-style
 window frame, mark it up → copy or save as PNG. Nothing is uploaded; everything
 runs locally.
 
-- **Product name:** Prism
+- **Product name:** ScreenXShot
 - **Repo / codename:** screenxshot
 - **Live web app:** https://screenxshot-three.vercel.app
 
@@ -34,7 +34,7 @@ runs locally.
 ### Vision
 A menu-bar/tray utility that lives in the background. Press a **global
 shortcut** → a **region-select overlay** appears → drag to choose the area →
-it's captured → the **Prism editor opens with that screenshot loaded and the
+it's captured → the **ScreenXShot editor opens with that screenshot loaded and the
 toolbox ready** to annotate → copy or save. Fast, instant-feeling, like
 CleanShot X / Shottr.
 
@@ -43,7 +43,7 @@ CleanShot X / Shottr.
 Global hotkey (e.g. ⇧⌘2)
    → transparent fullscreen region-select overlay (drag a rectangle)
    → native screen capture of that region (kept in memory)
-   → Prism window is revealed (already resident in tray) with the image loaded
+   → ScreenXShot window is revealed (already resident in tray) with the image loaded
    → user annotates with existing tools → Copy / Save PNG
 ```
 

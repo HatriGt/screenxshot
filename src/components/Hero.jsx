@@ -106,7 +106,7 @@ export default function Hero() {
         </div>
         <div className="hright reveal" style={{ transitionDelay: ".1s" }}>
           <p>
-            Prism sets your screenshot on a beautiful backdrop, wraps it in a clean frame, and lets you mark it up — then copy or save. All in the browser, nothing uploaded.
+            ScreenXShot sets your screenshot on a beautiful backdrop, wraps it in a clean frame, and lets you mark it up — then copy or save. All in the browser, nothing uploaded.
           </p>
           <div className="cta">
             <button className="pill pill-dark" id="heroPaste" onClick={() => editor.pick()}>

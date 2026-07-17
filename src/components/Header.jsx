@@ -6,7 +6,7 @@ export default function Header() {
           <span className="mk">
             <i></i>
           </span>
-          Prism
+          ScreenXShot
         </a>
         <nav className="nav-links">
           <a href="#studio">Studio</a>

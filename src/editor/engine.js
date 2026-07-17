@@ -251,7 +251,7 @@ export class Editor {
       c.strokeStyle = dk ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.07)";
       c.stroke();
       c.font = `${Math.round(ph * 0.44)}px "Manrope",-apple-system,sans-serif`;
-      const label = "prism.studio",
+      const label = "screenxshot.app",
         tw = c.measureText(label).width,
         ls = ph * 0.46,
         g2 = ls * 0.5,
@@ -883,7 +883,7 @@ export class Editor {
       if (!b) return;
       const a = document.createElement("a");
       a.href = URL.createObjectURL(b);
-      a.download = "prism-" + Date.now() + ".png";
+      a.download = "screenxshot-" + Date.now() + ".png";
       a.click();
       URL.revokeObjectURL(a.href);
     }, "image/png");
@@ -956,7 +956,7 @@ export class Editor {
     x.fillStyle = "#12141a";
     x.font = '700 18px Manrope,sans-serif';
     x.textBaseline = "middle";
-    x.fillText("Prism", 70, 42);
+    x.fillText("ScreenXShot", 70, 42);
     ["Overview", "Reports", "Customers", "Revenue", "Settings"].forEach((t, i) => {
       const y = 112 + i * 46;
       if (i === 0) {

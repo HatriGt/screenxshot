@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Prism — every screenshot, instantly beautiful. React + Vite + TanStack.",
+  "description": "ScreenXShot — every screenshot, instantly beautiful. React + Vite + TanStack.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

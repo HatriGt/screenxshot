@@ -1,9 +1,9 @@
 # screenxshot
 
-**Prism** — every screenshot, instantly beautiful.
+**ScreenXShot** — every screenshot, instantly beautiful.
 
 A privacy-first, client-side screenshot beautifier and annotator. Drop in a
-screenshot and Prism sets it on a beautiful backdrop, wraps it in a clean
+screenshot and ScreenXShot sets it on a beautiful backdrop, wraps it in a clean
 macOS-style window frame, lets you mark it up, then copy or save as PNG. No
 account, no upload, no server — your screenshot never leaves the browser tab.
 

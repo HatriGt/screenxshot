@@ -1,6 +1,6 @@
 {
-  "name": "Prism — every screenshot, instantly beautiful",
-  "short_name": "Prism",
+  "name": "ScreenXShot — every screenshot, instantly beautiful",
+  "short_name": "ScreenXShot",
   "description": "Free, privacy-first screenshot beautifier and annotator.",
   "start_url": "/",
   "display": "standalone",

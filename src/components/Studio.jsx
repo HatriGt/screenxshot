@@ -55,7 +55,7 @@ export default function Studio() {
                 <rect x="5" y="11" width="14" height="10" rx="2" />
                 <path d="M8 11V8a4 4 0 018 0v3" />
               </svg>
-              prism.studio
+              screenxshot.app
             </span>
             <div className={"stagebtns" + show} id="stagebtns">
               <button className="pill pill-white pill-sm" id="copy" onClick={() => editor.copy()}>

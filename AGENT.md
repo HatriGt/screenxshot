@@ -4,7 +4,7 @@ Guidance for AI agents (and humans) working in the **screenxshot** repository.
 
 ## What this project is
 
-**screenxshot** (product name **"Prism"**) is a **screenshot beautifier and
+**ScreenXShot** (formerly codenamed "Prism") is a **screenshot beautifier and
 annotator** that runs entirely in the browser. You drop in a raw screenshot and
 it turns it into a polished, shareable image — set on a beautiful backdrop,
 wrapped in a clean macOS-style window frame, marked up with annotations, then
@@ -15,7 +15,7 @@ The guiding principle is **privacy-first, zero-install**:
 
 It is comparable to tools like CleanShot X, Shots, or Ray.so's screenshot mode.
 
-- **Product name:** Prism (the fake in-app window reads `prism.studio`)
+- **Product name:** ScreenXShot (the fake in-app window reads `screenxshot.app`)
 - **Repo / codename:** screenxshot
 - **Status:** Early stage — everything lives in a single HTML file.
 

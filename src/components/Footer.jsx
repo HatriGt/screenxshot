@@ -6,7 +6,7 @@ export default function Footer() {
           <span className="mk">
             <i></i>
           </span>
-          Prism
+          ScreenXShot
         </span>
         <span>Free forever · nothing uploaded · runs entirely in your browser</span>
       </div>
