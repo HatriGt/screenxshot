@@ -251,7 +251,7 @@ export class Editor {
       c.strokeStyle = dk ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.07)";
       c.stroke();
       c.font = `${Math.round(ph * 0.44)}px "Manrope",-apple-system,sans-serif`;
-      const label = "screenxshot.app",
+      const label = "screenxshot.com",
         tw = c.measureText(label).width,
         ls = ph * 0.46,
         g2 = ls * 0.5,

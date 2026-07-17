@@ -8,7 +8,7 @@ runs locally.
 
 - **Product name:** ScreenXShot
 - **Repo / codename:** screenxshot
-- **Live web app:** https://screenxshot-three.vercel.app
+- **Live web app:** https://screenxshot.com (custom domain)
 
 ---
 
@@ -21,8 +21,8 @@ runs locally.
       `robots.txt`, `sitemap.xml`, generated `og.png`, `<noscript>` fallback.
 
 ## Next up (web)
-- [ ] Buy a custom domain (recommended: `screenxshot.com` — cheapest to keep,
-      best for trust/CTR) and point Vercel at it.
+- [x] Bought custom domain `screenxshot.com` (connect it in Vercel + DNS).
+- [x] Updated canonical URL, OG tags, sitemap, robots, titlebar to screenxshot.com.
 - [ ] After domain switch: update canonical URL, OG tags, and sitemap to the
       new domain.
 - [ ] Submit the site to **Google Search Console** + request indexing.
