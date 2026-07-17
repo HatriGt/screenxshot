@@ -1,0 +1,16 @@
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+// Tauri expects a fixed dev port and no clearing of the screen.
+export default defineConfig({
+  plugins: [react()],
+  clearScreen: false,
+  server: {
+    port: 5174,
+    strictPort: true,
+  },
+  // Consume the shared editor package as source (JSX) rather than pre-bundling.
+  optimizeDeps: {
+    exclude: ["@screenxshot/editor"],
+  },
+});

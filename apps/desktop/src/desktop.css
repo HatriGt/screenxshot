@@ -1,0 +1,19 @@
+/* Desktop wrapper-only layout. Does NOT restyle the editor itself — it only
+   adapts the framing now that Studio is the whole window instead of a section
+   in the marketing page. */
+
+/* The web app reveals `.window` on scroll via the useReveal hook. The desktop
+   shell has no scroll, so make revealed content visible immediately. */
+.reveal {
+  opacity: 1 !important;
+  transform: none !important;
+}
+
+/* Center the editor and give it breathing room in the native window. */
+#root {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 0;
+}
