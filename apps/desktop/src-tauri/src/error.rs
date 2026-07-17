@@ -2,8 +2,6 @@ use thiserror::Error;
 
 /// Application error type shared across Tauri commands. Implements `Serialize`
 /// so it can cross the IPC boundary as a string the frontend can catch.
-// Variants are consumed once capture commands land (U3); allow until then.
-#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error("capture failed: {0}")]
