@@ -1,0 +1,41 @@
+:root {
+  color-scheme: dark;
+}
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+html,
+body {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  cursor: crosshair;
+  background: transparent;
+  user-select: none;
+}
+#dim {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 10, 20, 0.35);
+}
+#selection {
+  position: fixed;
+  border: 1.5px solid #fff;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 0 100vmax rgba(8, 10, 20, 0.35);
+  pointer-events: none;
+}
+#hint {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font: 500 13px/1 -apple-system, "Manrope", sans-serif;
+  color: #fff;
+  background: rgba(8, 10, 20, 0.6);
+  padding: 8px 14px;
+  border-radius: 999px;
+  pointer-events: none;
+}

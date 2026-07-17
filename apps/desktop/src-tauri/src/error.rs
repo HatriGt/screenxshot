@@ -9,6 +9,9 @@ pub enum AppError {
 
     #[error("image encode failed: {0}")]
     Encode(String),
+
+    #[error("overlay error: {0}")]
+    Overlay(String),
 }
 
 impl serde::Serialize for AppError {

@@ -12,6 +12,6 @@
     "dev": "npm run dev -w @screenxshot/web",
     "build": "npm run build -w @screenxshot/web",
     "preview": "npm run preview -w @screenxshot/web",
-    "test": "node --test packages/editor/src/**/*.test.js"
+    "test": "node --test packages/editor/src/ && npm run test -w @screenxshot/desktop"
   }
 }

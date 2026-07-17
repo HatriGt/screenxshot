@@ -1,9 +1,67 @@
 use crate::capture::{clamp_rect, CaptureRect};
 use crate::error::AppError;
+use crate::overlay;
 use image::{ImageFormat, RgbaImage};
 use std::io::Cursor;
+use std::sync::Mutex;
 use tauri::ipc::Response;
+use tauri::{AppHandle, Emitter, Manager, State};
 use xcap::Monitor;
+
+/// Holds the most recent capture's PNG bytes until the editor pulls them.
+#[derive(Default)]
+pub struct CaptureBuffer(pub Mutex<Option<Vec<u8>>>);
+
+/// Show the region-select overlay (invoked by the hotkey or a UI trigger).
+#[tauri::command]
+pub fn show_overlay(app: AppHandle) -> Result<(), AppError> {
+    overlay::show_overlay(&app)
+}
+
+/// Cancel selection: close the overlay, no capture.
+#[tauri::command]
+pub fn cancel_overlay(app: AppHandle) -> Result<(), AppError> {
+    overlay::hide_overlay(&app)
+}
+
+/// Finish selection: capture the chosen region, close the overlay, reveal the
+/// main window, and notify it that a capture is ready to pull.
+#[tauri::command]
+pub async fn finish_capture(
+    app: AppHandle,
+    rect: CaptureRect,
+    buffer: State<'_, CaptureBuffer>,
+) -> Result<(), AppError> {
+    let bytes =
+        tauri::async_runtime::spawn_blocking(move || capture_region_png(rect, None))
+            .await
+            .map_err(|e| AppError::Capture(format!("capture task failed: {e}")))??;
+
+    *buffer.0.lock().unwrap() = Some(bytes);
+
+    overlay::hide_overlay(&app)?;
+
+    if let Some(main) = app.get_webview_window("main") {
+        main.show().map_err(|e| AppError::Overlay(e.to_string()))?;
+        main.set_focus()
+            .map_err(|e| AppError::Overlay(e.to_string()))?;
+    }
+    app.emit("capture:ready", ())
+        .map_err(|e| AppError::Overlay(e.to_string()))?;
+    Ok(())
+}
+
+/// Pull and clear the buffered capture as raw PNG bytes (called by the editor).
+#[tauri::command]
+pub fn take_capture(buffer: State<'_, CaptureBuffer>) -> Result<Response, AppError> {
+    let bytes = buffer
+        .0
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or_else(|| AppError::Capture("no capture available".into()))?;
+    Ok(Response::new(bytes))
+}
 
 /// Capture a screen region and return PNG bytes (in memory, no disk).
 ///

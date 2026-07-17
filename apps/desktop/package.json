@@ -8,19 +8,21 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "test": "vitest run",
     "tauri": "tauri"
   },
   "dependencies": {
     "@screenxshot/editor": "*",
-    "@tauri-apps/api": "^2",
     "@tanstack/react-store": "^0.5.5",
     "@tanstack/store": "^0.5.5",
+    "@tauri-apps/api": "^2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
     "@vitejs/plugin-react": "^4.3.1",
-    "vite": "^5.4.2"
+    "vite": "^5.4.2",
+    "vitest": "^4.1.10"
   }
 }
