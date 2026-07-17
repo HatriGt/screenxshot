@@ -1,4 +1,4 @@
-import { editor } from "../editor/instance.js";
+import { editor } from "@screenxshot/editor";
 
 export default function Hero() {
   return (

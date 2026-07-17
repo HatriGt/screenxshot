@@ -1,0 +1,30 @@
+{
+  "name": "@screenxshot/editor",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Shared ScreenXShot editor: canvas engine, store, data, UI components, styles.",
+  "scripts": {
+    "test": "node --test src/**/*.test.js"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./engine": "./src/editor/engine.js",
+    "./store": "./src/editor/store.js",
+    "./data": "./src/editor/data.js",
+    "./instance": "./src/editor/instance.js",
+    "./entitlements": "./src/entitlements.js",
+    "./styles.css": "./src/styles.css",
+    "./components/Studio": "./src/components/Studio.jsx",
+    "./components/Dock": "./src/components/Dock.jsx",
+    "./components/Panel": "./src/components/Panel.jsx",
+    "./hooks/useReveal": "./src/hooks/useReveal.js",
+    "./hooks/useParallax": "./src/hooks/useParallax.js"
+  },
+  "peerDependencies": {
+    "@tanstack/react-store": "^0.5.5",
+    "@tanstack/store": "^0.5.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}
