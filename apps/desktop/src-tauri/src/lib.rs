@@ -17,6 +17,9 @@ pub fn run() {
     tauri::Builder::default()
         .manage(commands::CaptureBuffer::default())
         .plugin(build_global_shortcut())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             register_capture_shortcut(app.handle())?;
             build_tray(app.handle())?;
@@ -38,6 +41,7 @@ pub fn run() {
             commands::cancel_overlay,
             commands::finish_capture,
             commands::take_capture,
+            commands::save_png,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

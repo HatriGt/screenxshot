@@ -22,3 +22,6 @@ thiserror = "2"
 xcap = "0.7"
 image = { version = "0.25", default-features = false, features = ["png"] }
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"

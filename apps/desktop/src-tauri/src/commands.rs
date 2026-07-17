@@ -51,6 +51,13 @@ pub async fn finish_capture(
     Ok(())
 }
 
+/// Write PNG bytes to an absolute path chosen by the user (native save-as
+/// fallback when the webview blocks the anchor-download path).
+#[tauri::command]
+pub fn save_png(path: String, bytes: Vec<u8>) -> Result<(), AppError> {
+    std::fs::write(&path, &bytes).map_err(|e| AppError::Encode(format!("write {path}: {e}")))
+}
+
 /// Pull and clear the buffered capture as raw PNG bytes (called by the editor).
 #[tauri::command]
 pub fn take_capture(buffer: State<'_, CaptureBuffer>) -> Result<Response, AppError> {
