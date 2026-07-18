@@ -1,5 +1,10 @@
 import { test, expect } from "vitest";
-import { normalizeRect, isMeaningfulSelection } from "./rect";
+import {
+  normalizeRect,
+  isMeaningfulSelection,
+  toPhysicalRect,
+  monitorIndexFromLabel,
+} from "./rect";
 
 test("normalizeRect handles a top-left to bottom-right drag", () => {
   expect(normalizeRect({ x: 10, y: 20 }, { x: 110, y: 220 })).toEqual({
@@ -34,4 +39,24 @@ test("isMeaningfulSelection rejects a click (near-zero area)", () => {
 
 test("isMeaningfulSelection accepts a real drag", () => {
   expect(isMeaningfulSelection({ x: 5, y: 5, width: 200, height: 120 })).toBe(true);
+});
+
+test("toPhysicalRect scales css pixels by the device pixel ratio", () => {
+  expect(toPhysicalRect({ x: 10, y: 20, width: 100, height: 50 }, 2)).toEqual({
+    x: 20,
+    y: 40,
+    width: 200,
+    height: 100,
+  });
+});
+
+test("toPhysicalRect is identity at scale 1", () => {
+  const r = { x: 3, y: 7, width: 40, height: 12 };
+  expect(toPhysicalRect(r, 1)).toEqual(r);
+});
+
+test("monitorIndexFromLabel parses overlay labels", () => {
+  expect(monitorIndexFromLabel("overlay-0")).toBe(0);
+  expect(monitorIndexFromLabel("overlay-5")).toBe(5);
+  expect(monitorIndexFromLabel("main")).toBeNull();
 });

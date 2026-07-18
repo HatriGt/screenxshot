@@ -888,6 +888,12 @@ export class Editor {
       URL.revokeObjectURL(a.href);
     }, "image/png");
   }
+  /** Export the current visible composition as a PNG Blob (null if empty). */
+  async exportCurrentBlob() {
+    if (!this.imgCanvas) return null;
+    this.paint();
+    return await new Promise((r) => this.canvas.toBlob(r, "image/png"));
+  }
   async copy() {
     if (!this.imgCanvas) return;
     this.paint();
@@ -902,6 +908,86 @@ export class Editor {
   flash(msg) {
     set({ copyLabel: msg });
     setTimeout(() => set({ copyLabel: "Copy" }), 1200);
+  }
+
+  /** Snapshot the current backdrop/frame style (for "save as default"). */
+  snapshotStyle() {
+    const s = this.state;
+    return {
+      color: s.color,
+      size: s.size,
+      frame: s.frame,
+      padding: s.padding,
+      srad: s.srad,
+      shadow: s.shadow,
+      bg: s.bg,
+    };
+  }
+
+  /**
+   * Headlessly render `src` with the given style applied and return a PNG Blob.
+   * Reuses the full beautify pipeline on a throwaway offscreen engine so the
+   * visible editor is never disturbed. `style` may be null → built-in defaults.
+   */
+  async exportStyledBlob(src, style) {
+    const off = new Editor();
+    // Detach from the shared store so the visible editor is never disturbed:
+    // give this instance a private, frozen-in-time state clone.
+    if (off._unsub) off._unsub();
+    off.state = { ...editorStore.state };
+    if (style && typeof style === "object") {
+      Object.assign(off.state, {
+        color: style.color ?? off.state.color,
+        size: style.size ?? off.state.size,
+        frame: style.frame ?? off.state.frame,
+        padding: style.padding ?? off.state.padding,
+        srad: style.srad ?? off.state.srad,
+        shadow: style.shadow ?? off.state.shadow,
+        bg: style.bg ?? off.state.bg,
+      });
+    }
+    off.canvas = document.createElement("canvas");
+    off.ctx = off.canvas.getContext("2d");
+    off.empty = document.createElement("div");
+    off.mounted = true;
+    // Inert the store-writing hooks so this offscreen render never touches the
+    // shared editorStore (which drives the visible UI).
+    off.syncFlags = () => {};
+    off.setTool = () => {};
+    off.hideSelbar = () => {};
+    off.hideCropBar = () => {};
+    // Wait for any wall backdrop image this style needs before painting.
+    if (off.state.bg?.kind === "wall") {
+      await Editor._ensureWall(off, off.state.bg.id);
+    }
+    await new Promise((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => {
+        off.loadImage(im);
+        resolve();
+      };
+      im.onerror = reject;
+      im.src = src;
+    });
+    off.buildBase();
+    off.paint();
+    return await new Promise((r) => off.canvas.toBlob(r, "image/png"));
+  }
+
+  /** Ensure the wall image with `id` is decoded into `inst.WALLIMG`. */
+  static _ensureWall(inst, id) {
+    if (inst.WALLIMG[id]) return Promise.resolve();
+    const wall = WALLS.find((w) => w.id === id);
+    if (!wall) return Promise.resolve();
+    return new Promise((resolve) => {
+      const im = new Image();
+      im.onload = () => {
+        inst.WALLIMG[id] = im;
+        resolve();
+      };
+      im.onerror = () => resolve();
+      im.src = wallSrc(wall);
+    });
   }
 
   // ---- tool + settings actions (called from React) --------------------------
