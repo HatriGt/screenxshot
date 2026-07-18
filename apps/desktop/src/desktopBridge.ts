@@ -6,11 +6,25 @@ import { editor } from "@screenxshot/editor";
 import { bytesToObjectUrl } from "./bytesToObjectUrl";
 import { needsNativeClipboard, needsNativeSave } from "./clipboardFallback";
 import { joinSavePath } from "./savePath";
-import type { AfterCapture, Settings } from "./settings/types";
+import type { AfterCapture, ExportFormat, Settings } from "./settings/types";
 
 interface AutoCapturePayload {
   mode: AfterCapture;
   style: unknown;
+}
+
+/** Filename extension for the configured export format (files only). */
+function formatExtension(format: ExportFormat): string {
+  switch (format) {
+    case "png":
+      return "png";
+    case "jpeg":
+      return "jpg";
+    default: {
+      const _never: never = format;
+      return _never;
+    }
+  }
 }
 
 // The single place the desktop app talks to Tauri for capture delivery. Keeps
@@ -34,22 +48,25 @@ export async function nativeSavePng(bytes: Uint8Array): Promise<void> {
   if (!needsNativeSave({ anchorDownloadSupported: anchorDownloadSupported() })) {
     return; // web anchor-download path handles it
   }
-  const filename = `screenxshot-${Date.now()}.png`;
+  // The `bytes` are PNG; Rust re-encodes to the configured format on write.
+  const settings = await invoke<Settings>("get_settings").catch(() => null);
+  const format: ExportFormat = settings?.export_format ?? "png";
+  const ext = formatExtension(format);
+  const filename = `screenxshot-${Date.now()}.${ext}`;
 
   // If the user set a default save folder, write straight there — no dialog.
-  const settings = await invoke<Settings>("get_settings").catch(() => null);
   if (settings?.save_dir) {
     const path = joinSavePath(settings.save_dir, filename);
-    await invoke("save_png", { path, bytes: Array.from(bytes) });
+    await invoke("save_capture_as", { path, bytes: Array.from(bytes) });
     return;
   }
 
   const path = await save({
     defaultPath: filename,
-    filters: [{ name: "PNG", extensions: ["png"] }],
+    filters: [{ name: format.toUpperCase(), extensions: [ext] }],
   });
   if (path) {
-    await invoke("save_png", { path, bytes: Array.from(bytes) });
+    await invoke("save_capture_as", { path, bytes: Array.from(bytes) });
   }
 }
 
@@ -122,14 +139,17 @@ export async function saveCurrentToFolder(): Promise<void> {
   const bytes = await blobToBytes(blob);
   const settings = await invoke<Settings>("get_settings").catch(() => null);
   if (settings?.save_dir) {
+    // Rust picks the format-appropriate extension + re-encodes as needed.
     await invoke("auto_save_capture", { bytes: Array.from(bytes) });
     return;
   }
+  const format: ExportFormat = settings?.export_format ?? "png";
+  const ext = formatExtension(format);
   const path = await save({
-    defaultPath: `screenxshot-${Date.now()}.png`,
-    filters: [{ name: "PNG", extensions: ["png"] }],
+    defaultPath: `screenxshot-${Date.now()}.${ext}`,
+    filters: [{ name: format.toUpperCase(), extensions: [ext] }],
   });
-  if (path) await invoke("save_png", { path, bytes: Array.from(bytes) });
+  if (path) await invoke("save_capture_as", { path, bytes: Array.from(bytes) });
 }
 
 /** Persist the current editor look as the default style for auto-copy mode. */

@@ -36,6 +36,20 @@ body {
   pointer-events: none;
 }
 
+/* Self-timer countdown — a big centered number shown before the grab. It is
+   overlay chrome and must be cleared before capture (handled in overlay.ts). */
+#countdown {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font: 700 clamp(120px, 22vw, 300px) / 1 -apple-system, "Manrope", sans-serif;
+  color: #fff;
+  text-shadow: 0 6px 40px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  user-select: none;
+}
+
 #hint {
   position: fixed;
   top: 44px;

@@ -4,7 +4,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { HotkeyRecorder } from "./HotkeyRecorder";
-import type { AfterCapture, Settings } from "./types";
+import type {
+  AfterCapture,
+  ExportFormat,
+  Settings,
+  ToastPosition,
+} from "./types";
 import "./settings.css";
 
 interface ToggleProps {
@@ -28,6 +33,46 @@ function Toggle({ checked, onChange, label }: ToggleProps) {
   );
 }
 
+interface SegRowProps<T extends string | number> {
+  label: string;
+  hint?: string;
+  value: T;
+  options: { id: T; label: string }[];
+  onChange: (v: T) => void;
+}
+
+/** A labelled row with a segmented (radio-group) control. */
+function SegRow<T extends string | number>({
+  label,
+  hint,
+  value,
+  options,
+  onChange,
+}: SegRowProps<T>) {
+  return (
+    <div className="item item--col">
+      <div className="item__row">
+        <span className="item__label">{label}</span>
+        <div className="seg" role="radiogroup" aria-label={label}>
+          {options.map((o) => (
+            <button
+              key={String(o.id)}
+              type="button"
+              role="radio"
+              aria-checked={value === o.id}
+              className={"seg__opt" + (value === o.id ? " is-active" : "")}
+              onClick={() => onChange(o.id)}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {hint && <p className="item__hint">{hint}</p>}
+    </div>
+  );
+}
+
 const AFTER_CAPTURE_OPTIONS: { id: AfterCapture; label: string }[] = [
   { id: "open-editor", label: "Open editor" },
   { id: "copy-styled", label: "Copy styled" },
@@ -39,6 +84,33 @@ const AFTER_CAPTURE_DESC: Record<AfterCapture, string> = {
   "copy-styled": "Apply your saved look, copy it, and show a quick toast.",
   "copy-raw": "Copy the plain screenshot straight to the clipboard.",
 };
+
+const TOAST_POSITION_OPTIONS: { id: ToastPosition; label: string }[] = [
+  { id: "top-left", label: "Top left" },
+  { id: "top-right", label: "Top right" },
+  { id: "bottom-left", label: "Bottom left" },
+  { id: "bottom-right", label: "Bottom right" },
+];
+
+// 0 = "Never" (no auto-dismiss; the toast stays until clicked/dismissed).
+const TOAST_DISMISS_OPTIONS: { id: number; label: string }[] = [
+  { id: 3000, label: "3s" },
+  { id: 5000, label: "5s" },
+  { id: 8000, label: "8s" },
+  { id: 0, label: "Never" },
+];
+
+const SELF_TIMER_OPTIONS: { id: number; label: string }[] = [
+  { id: 0, label: "Off" },
+  { id: 3, label: "3s" },
+  { id: 5, label: "5s" },
+  { id: 10, label: "10s" },
+];
+
+const EXPORT_FORMAT_OPTIONS: { id: ExportFormat; label: string }[] = [
+  { id: "png", label: "PNG" },
+  { id: "jpeg", label: "JPEG" },
+];
 
 function SettingsApp() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -115,6 +187,14 @@ function SettingsApp() {
             <p className="item__hint">{AFTER_CAPTURE_DESC[s.after_capture]}</p>
           </div>
 
+          <SegRow
+            label="Self-timer"
+            hint="Count down before grabbing so you can set up the shot."
+            value={s.self_timer_secs}
+            options={SELF_TIMER_OPTIONS}
+            onChange={(self_timer_secs) => patch({ self_timer_secs })}
+          />
+
           <div className="item">
             <div className="item__text">
               <span className="item__label">Default style</span>
@@ -173,8 +253,36 @@ function SettingsApp() {
           )}
         </div>
 
+        <p className="grp__label">Overlay</p>
+        <div className="grp">
+          <SegRow
+            label="Toast position"
+            value={s.toast_position}
+            options={TOAST_POSITION_OPTIONS}
+            onChange={(toast_position) => patch({ toast_position })}
+          />
+          <SegRow
+            label="Auto-dismiss"
+            hint={
+              s.toast_dismiss_ms === 0
+                ? "Toast stays until you click or dismiss it."
+                : "How long the capture toast lingers before closing."
+            }
+            value={s.toast_dismiss_ms}
+            options={TOAST_DISMISS_OPTIONS}
+            onChange={(toast_dismiss_ms) => patch({ toast_dismiss_ms })}
+          />
+        </div>
+
         <p className="grp__label">General</p>
         <div className="grp">
+          <SegRow
+            label="Export format"
+            hint="Applies to saved files. Clipboard copies always stay PNG."
+            value={s.export_format}
+            options={EXPORT_FORMAT_OPTIONS}
+            onChange={(export_format) => patch({ export_format })}
+          />
           <div className="item">
             <div className="item__text">
               <span className="item__label">Launch on startup</span>

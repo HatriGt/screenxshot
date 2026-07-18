@@ -8,10 +8,60 @@ mod toast;
 pub use error::AppError;
 
 use tauri::{
-    menu::{Menu, MenuItem},
-    tray::TrayIconBuilder,
-    Manager, WindowEvent,
+    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
+    tray::{TrayIconBuilder, TrayIconEvent},
+    AppHandle, LogicalPosition, Manager, WindowEvent,
 };
+
+/// Bring the main window to the front, centered on the primary monitor.
+///
+/// Shared by the tray icon click, the tray "Open ScreenXShot" item, and the
+/// native app menu. On macOS the app may be in `Accessory` activation policy
+/// (resident/hidden mode); we restore `Regular` first so the window can take
+/// focus. Errors are logged, never panicked on.
+fn show_main_window(app: &AppHandle) -> Result<(), AppError> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| AppError::Overlay("main window not found".into()))?;
+
+    // Resident/hidden mode drops to Accessory; Regular lets the window focus.
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::ActivationPolicy;
+        let _ = app.set_activation_policy(ActivationPolicy::Regular);
+    }
+
+    // Center on the primary monitor using the window's current outer size.
+    match app.primary_monitor() {
+        Ok(Some(monitor)) => {
+            let scale = monitor.scale_factor();
+            let mon_pos = monitor.position().to_logical::<f64>(scale);
+            let mon_size = monitor.size().to_logical::<f64>(scale);
+            match window.outer_size() {
+                Ok(win_size) => {
+                    let win = win_size.to_logical::<f64>(scale);
+                    let x = mon_pos.x + (mon_size.width - win.width) / 2.0;
+                    let y = mon_pos.y + (mon_size.height - win.height) / 2.0;
+                    if let Err(e) = window.set_position(LogicalPosition::new(x, y)) {
+                        eprintln!("warning: could not center main window: {e}");
+                    }
+                }
+                Err(e) => eprintln!("warning: could not read main window size: {e}"),
+            }
+        }
+        Ok(None) => eprintln!("warning: no primary monitor found; skipping centering"),
+        Err(e) => eprintln!("warning: could not query primary monitor: {e}"),
+    }
+
+    let _ = window.unminimize();
+    window
+        .show()
+        .map_err(|e| AppError::Overlay(e.to_string()))?;
+    window
+        .set_focus()
+        .map_err(|e| AppError::Overlay(e.to_string()))?;
+    Ok(())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -37,6 +87,7 @@ pub fn run() {
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
             register_capture_shortcut(app.handle());
+            build_app_menu(app.handle())?;
             build_tray(app.handle())?;
             // Warm up the overlay windows (hidden) so the first hotkey press
             // shows them instantly rather than building webviews inline.
@@ -59,6 +110,13 @@ pub fn run() {
                 }
             }
         })
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == "show-main" {
+                if let Err(e) = show_main_window(app) {
+                    eprintln!("warning: show main window failed: {e}");
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             commands::capture_region,
             commands::show_overlay,
@@ -69,6 +127,7 @@ pub fn run() {
             commands::capture_window,
             commands::take_capture,
             commands::save_png,
+            commands::save_capture_as,
             commands::get_settings,
             commands::set_settings,
             commands::set_hotkey,
@@ -105,25 +164,58 @@ fn register_capture_shortcut(app: &tauri::AppHandle) {
     }
 }
 
+/// Build the native application menu (macOS system menu bar; on Windows it
+/// attaches to the window). Contains an app-name submenu and a Window submenu
+/// with "Show ScreenXShot" (Cmd+Shift+H) which brings the main window forward.
+fn build_app_menu(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let show_item = MenuItem::with_id(
+        app,
+        "show-main",
+        "Show ScreenXShot",
+        true,
+        Some("CmdOrCtrl+Shift+H"),
+    )?;
+    let quit_item = PredefinedMenuItem::quit(app, None)?;
+
+    let app_submenu = Submenu::with_items(app, "ScreenXShot", true, &[&show_item, &quit_item])?;
+    let window_submenu = Submenu::with_items(app, "Window", true, &[&show_item])?;
+    let menu = Menu::with_items(app, &[&app_submenu, &window_submenu])?;
+
+    app.set_menu(menu)?;
+    Ok(())
+}
+
 fn build_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let capture_item = MenuItem::with_id(app, "capture", "Capture region", true, None::<&str>)?;
     let show_item = MenuItem::with_id(app, "show", "Open ScreenXShot", true, None::<&str>)?;
     let settings_item = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&capture_item, &show_item, &settings_item, &quit_item])?;
+    let menu = Menu::with_items(app, &[&show_item, &capture_item, &settings_item, &quit_item])?;
 
     TrayIconBuilder::new()
         .icon(app.default_window_icon().unwrap().clone())
         .tooltip("ScreenXShot")
         .menu(&menu)
+        .on_tray_icon_event(|tray, event| {
+            // Left/primary click on the tray icon brings the main window forward.
+            if let TrayIconEvent::Click {
+                button: tauri::tray::MouseButton::Left,
+                button_state: tauri::tray::MouseButtonState::Up,
+                ..
+            } = event
+            {
+                if let Err(e) = show_main_window(tray.app_handle()) {
+                    eprintln!("warning: show main window failed: {e}");
+                }
+            }
+        })
         .on_menu_event(|app, event| match event.id.as_ref() {
             "capture" => {
                 let _ = overlay::show_overlay(app);
             }
             "show" => {
-                if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.show();
-                    let _ = w.set_focus();
+                if let Err(e) = show_main_window(app) {
+                    eprintln!("warning: show main window failed: {e}");
                 }
             }
             "settings" => {

@@ -1,7 +1,8 @@
 use crate::capture::{clamp_rect, CaptureRect};
 use crate::error::AppError;
 use crate::overlay;
-use crate::settings::Settings;
+use crate::settings::{ExportFormat, Settings};
+use image::codecs::jpeg::JpegEncoder;
 use image::{ImageFormat, RgbaImage};
 use std::io::Cursor;
 use std::sync::Mutex;
@@ -151,13 +152,18 @@ fn copy_image_to_clipboard(app: &AppHandle, png: &[u8]) {
 
 /// Save PNG bytes to the configured folder (best-effort; no-op if unset).
 fn auto_save_bytes(app: &AppHandle, bytes: &[u8]) -> Result<(), AppError> {
-    let dir = crate::settings::load(app).save_dir;
-    if dir.trim().is_empty() {
+    let settings = crate::settings::load(app);
+    if settings.save_dir.trim().is_empty() {
         return Ok(());
     }
-    let name = format!("ScreenXShot-{}.png", timestamp());
-    let path = std::path::Path::new(&dir).join(name);
-    std::fs::write(&path, bytes)
+    let out = encode_for_export(bytes, settings.export_format)?;
+    let name = format!(
+        "ScreenXShot-{}.{}",
+        timestamp(),
+        settings.export_format.extension()
+    );
+    let path = std::path::Path::new(&settings.save_dir).join(name);
+    std::fs::write(&path, out)
         .map_err(|e| AppError::Encode(format!("write {}: {e}", path.display())))?;
     Ok(())
 }
@@ -264,17 +270,32 @@ pub fn save_png(path: String, bytes: Vec<u8>) -> Result<(), AppError> {
     std::fs::write(&path, &bytes).map_err(|e| AppError::Encode(format!("write {path}: {e}")))
 }
 
+/// Save capture bytes (always supplied as PNG) to an explicit path, re-encoding
+/// to the user's configured `export_format` first. Used by the native save-as
+/// dialog fallback so a chosen `.jpg` path actually contains JPEG bytes.
+#[tauri::command]
+pub fn save_capture_as(app: AppHandle, path: String, bytes: Vec<u8>) -> Result<(), AppError> {
+    let format = crate::settings::load(&app).export_format;
+    let out = encode_for_export(&bytes, format)?;
+    std::fs::write(&path, out).map_err(|e| AppError::Encode(format!("write {path}: {e}")))
+}
+
 /// Save auto-captured PNG bytes to the user's chosen folder with a timestamped
 /// filename. Returns the written path. Errors if no `save_dir` is configured.
 #[tauri::command]
 pub fn auto_save_capture(app: AppHandle, bytes: Vec<u8>) -> Result<String, AppError> {
-    let dir = crate::settings::load(&app).save_dir;
-    if dir.trim().is_empty() {
+    let settings = crate::settings::load(&app);
+    if settings.save_dir.trim().is_empty() {
         return Err(AppError::Encode("no save folder configured".into()));
     }
-    let name = format!("ScreenXShot-{}.png", timestamp());
-    let path = std::path::Path::new(&dir).join(name);
-    std::fs::write(&path, &bytes)
+    let out = encode_for_export(&bytes, settings.export_format)?;
+    let name = format!(
+        "ScreenXShot-{}.{}",
+        timestamp(),
+        settings.export_format.extension()
+    );
+    let path = std::path::Path::new(&settings.save_dir).join(name);
+    std::fs::write(&path, out)
         .map_err(|e| AppError::Encode(format!("write {}: {e}", path.display())))?;
     Ok(path.to_string_lossy().into_owned())
 }
@@ -540,6 +561,32 @@ fn encode_png(img: RgbaImage) -> Result<Vec<u8>, AppError> {
     img.write_to(&mut buf, ImageFormat::Png)
         .map_err(|e| AppError::Encode(e.to_string()))?;
     Ok(buf.into_inner())
+}
+
+/// Quality (0–100) used for JPEG file saves. Hardcoded — a dedicated setting
+/// isn't worth the surface area; 90 is a good default for screenshots.
+const JPEG_QUALITY: u8 = 90;
+
+/// Re-encode already-PNG capture bytes into the user's chosen FILE format.
+///
+/// Clipboard writes always stay PNG (see `copy_image_to_clipboard` / the JS
+/// clipboard paths) for maximum app compatibility; only disk saves honor
+/// `export_format`. PNG passes through untouched; JPEG decodes the PNG, drops
+/// the alpha channel (JPEG has none), and encodes at `JPEG_QUALITY`.
+fn encode_for_export(png_bytes: &[u8], format: ExportFormat) -> Result<Vec<u8>, AppError> {
+    match format {
+        ExportFormat::Png => Ok(png_bytes.to_vec()),
+        ExportFormat::Jpeg => {
+            let rgba = image::load_from_memory_with_format(png_bytes, ImageFormat::Png)
+                .map_err(|e| AppError::Encode(format!("decode png: {e}")))?
+                .to_rgb8();
+            let mut buf = Cursor::new(Vec::new());
+            JpegEncoder::new_with_quality(&mut buf, JPEG_QUALITY)
+                .encode_image(&rgba)
+                .map_err(|e| AppError::Encode(format!("encode jpeg: {e}")))?;
+            Ok(buf.into_inner())
+        }
+    }
 }
 
 #[cfg(test)]

@@ -25,6 +25,52 @@ impl Default for AfterCapture {
     }
 }
 
+/// Which corner of the primary monitor the capture toast appears in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ToastPosition {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl Default for ToastPosition {
+    fn default() -> Self {
+        ToastPosition::BottomRight
+    }
+}
+
+/// File format used for saving captures to disk. Clipboard always stays PNG for
+/// broad app compatibility; this only affects FILE saves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExportFormat {
+    Png,
+    Jpeg,
+}
+
+impl Default for ExportFormat {
+    fn default() -> Self {
+        ExportFormat::Png
+    }
+}
+
+impl ExportFormat {
+    /// Filename extension (no dot) for this format.
+    pub fn extension(self) -> &'static str {
+        match self {
+            ExportFormat::Png => "png",
+            ExportFormat::Jpeg => "jpg",
+        }
+    }
+}
+
+/// Auto-save toast dismiss timeout: 0 means "Never" (stay until clicked).
+fn default_toast_dismiss_ms() -> u32 {
+    5000
+}
+
 /// User preferences, persisted to `settings.json` via `tauri-plugin-store`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
@@ -45,6 +91,19 @@ pub struct Settings {
     /// editor's built-in defaults are used.
     #[serde(default)]
     pub default_style: serde_json::Value,
+    /// Corner the capture toast appears in.
+    #[serde(default)]
+    pub toast_position: ToastPosition,
+    /// Auto-dismiss timeout for the toast, in milliseconds. 0 = never
+    /// auto-dismiss (the toast stays until clicked/dismissed).
+    #[serde(default = "default_toast_dismiss_ms")]
+    pub toast_dismiss_ms: u32,
+    /// Countdown before a capture is grabbed, in seconds. 0 = off.
+    #[serde(default)]
+    pub self_timer_secs: u32,
+    /// File format for saving captures to disk (clipboard stays PNG).
+    #[serde(default)]
+    pub export_format: ExportFormat,
 }
 
 impl Default for Settings {
@@ -56,6 +115,10 @@ impl Default for Settings {
             tray_closes_to_tray: true,
             after_capture: AfterCapture::default(),
             default_style: serde_json::Value::Null,
+            toast_position: ToastPosition::default(),
+            toast_dismiss_ms: default_toast_dismiss_ms(),
+            self_timer_secs: 0,
+            export_format: ExportFormat::default(),
         }
     }
 }
@@ -148,6 +211,22 @@ mod tests {
         assert!(s.save_dir.is_empty());
         assert_eq!(s.after_capture, AfterCapture::OpenEditor);
         assert!(s.default_style.is_null());
+        assert_eq!(s.toast_position, ToastPosition::BottomRight);
+        assert_eq!(s.toast_dismiss_ms, 5000);
+        assert_eq!(s.self_timer_secs, 0);
+        assert_eq!(s.export_format, ExportFormat::Png);
+    }
+
+    #[test]
+    fn export_format_extension_maps_to_png_or_jpg() {
+        assert_eq!(ExportFormat::Png.extension(), "png");
+        assert_eq!(ExportFormat::Jpeg.extension(), "jpg");
+    }
+
+    #[test]
+    fn toast_position_serializes_kebab_case() {
+        let json = serde_json::to_string(&ToastPosition::BottomLeft).unwrap();
+        assert_eq!(json, "\"bottom-left\"");
     }
 
     #[test]
@@ -168,6 +247,11 @@ mod tests {
         let s: Settings = serde_json::from_value(legacy).unwrap();
         assert_eq!(s.after_capture, AfterCapture::OpenEditor);
         assert!(s.default_style.is_null());
+        // New Phase-1 fields fall back to their defaults.
+        assert_eq!(s.toast_position, ToastPosition::BottomRight);
+        assert_eq!(s.toast_dismiss_ms, 5000);
+        assert_eq!(s.self_timer_secs, 0);
+        assert_eq!(s.export_format, ExportFormat::Png);
     }
 
     #[test]
@@ -179,6 +263,10 @@ mod tests {
             tray_closes_to_tray: false,
             after_capture: AfterCapture::CopyStyled,
             default_style: serde_json::json!({ "bg": { "kind": "wall", "id": "bloom" } }),
+            toast_position: ToastPosition::TopLeft,
+            toast_dismiss_ms: 0,
+            self_timer_secs: 3,
+            export_format: ExportFormat::Jpeg,
         };
         let json = serde_json::to_value(&s).unwrap();
         let back: Settings = serde_json::from_value(json).unwrap();

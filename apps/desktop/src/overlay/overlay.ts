@@ -7,11 +7,14 @@ import {
   monitorIndexFromLabel,
   type SelectionRect,
 } from "./rect";
+import { countdownSequence } from "./countdown";
+import type { Settings } from "../settings/types";
 
 const dim = document.getElementById("dim") as HTMLElement;
 const selEl = document.getElementById("selection") as HTMLElement;
 const bar = document.getElementById("bar") as HTMLElement;
 const hint = document.getElementById("hint") as HTMLElement;
+const countdownEl = document.getElementById("countdown") as HTMLElement;
 
 let start: { x: number; y: number } | null = null;
 let finished = false;
@@ -37,6 +40,7 @@ function resetSelection() {
   dim.hidden = false;
   bar.hidden = false;
   hint.hidden = false;
+  clearCountdown();
 }
 
 async function cancel() {
@@ -85,6 +89,7 @@ window.addEventListener("pointerup", async (e) => {
     return;
   }
   finished = true;
+  await runSelfTimer();
   await invoke("finish_capture", {
     rect: toPhysicalRect(cssRect, scaleFactor),
     monitorIndex,
@@ -108,11 +113,42 @@ function blankOverlay() {
   bar.hidden = true;
   hint.hidden = true;
   selEl.hidden = true;
+  clearCountdown();
+}
+
+/** Show the countdown number centered on this monitor's overlay. */
+function showCountdownNumber(n: number): void {
+  countdownEl.hidden = false;
+  countdownEl.textContent = String(n);
+}
+
+/** Clear the countdown chrome. MUST run before the grab — it is our own chrome
+ * (like the dim/toolbar) and would otherwise be baked into the screenshot. */
+function clearCountdown(): void {
+  countdownEl.hidden = true;
+  countdownEl.textContent = "";
+}
+
+/**
+ * If a self-timer is configured, count down (3..2..1) in the overlay before
+ * proceeding with the capture. Resolves once the countdown finishes and the
+ * countdown chrome has been cleared. No-op (immediate) when the timer is off.
+ */
+async function runSelfTimer(): Promise<void> {
+  const settings = await invoke<Settings>("get_settings").catch(() => null);
+  const seq = countdownSequence(settings?.self_timer_secs ?? 0);
+  if (seq.length === 0) return;
+  for (const n of seq) {
+    showCountdownNumber(n);
+    await new Promise((r) => window.setTimeout(r, 1000));
+  }
+  clearCountdown();
 }
 
 async function captureScreen() {
   if (finished) return;
   finished = true;
+  await runSelfTimer();
   blankOverlay();
   await invoke("capture_fullscreen", { monitorIndex }).catch((err) =>
     console.error("capture fullscreen failed", err),
@@ -122,6 +158,7 @@ async function captureScreen() {
 async function captureWindow() {
   if (finished) return;
   finished = true;
+  await runSelfTimer();
   blankOverlay();
   await invoke("capture_window").catch((err) => console.error("capture window failed", err));
 }

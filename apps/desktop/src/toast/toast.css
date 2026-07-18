@@ -249,6 +249,10 @@ body {
 .toast__bar i.run {
   animation: toast-count var(--toast-dur, 5s) linear forwards;
 }
+/* "Never" auto-dismiss: hide the countdown bar entirely (no timeout to show). */
+#toast.no-timeout .toast__bar {
+  visibility: hidden;
+}
 /* Indeterminate sweep while capturing (no known duration yet). */
 #toast.is-capturing .toast__bar i {
   width: 40%;

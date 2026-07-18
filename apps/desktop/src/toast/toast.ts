@@ -1,9 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-const DURATION_MS = 5000;
+const DEFAULT_DURATION_MS = 5000;
 
 type Phase = "capturing" | "ready";
+
+/** Payload of the `toast:phase` event emitted by Rust. `dismissMs` of 0 means
+ * "Never" — no countdown bar, no auto-timeout (stays until clicked/dismissed). */
+interface PhaseEvent {
+  phase: Phase;
+  // serde serializes the Rust field `dismiss_ms` as snake_case.
+  dismiss_ms: number;
+}
+
+// Configured auto-dismiss timeout in ms; 0 = Never. Updated on each phase event.
+let dismissMs = DEFAULT_DURATION_MS;
 
 const toast = document.getElementById("toast") as HTMLButtonElement;
 const bar = document.getElementById("toastbar") as HTMLElement;
@@ -48,12 +59,21 @@ function edit(): void {
 function startCountdown(): void {
   done = false;
   clearTimer();
-  bar.style.setProperty("--toast-dur", `${DURATION_MS}ms`);
+  // "Never" (dismissMs === 0): the image was already copied + saved in Rust;
+  // we simply keep the toast up with no bar and no auto-timeout. The user
+  // clicks to edit or dismisses it manually.
+  if (dismissMs <= 0) {
+    bar.classList.remove("run");
+    toast.classList.add("no-timeout");
+    return;
+  }
+  toast.classList.remove("no-timeout");
+  bar.style.setProperty("--toast-dur", `${dismissMs}ms`);
   // Restart the CSS animation cleanly.
   bar.classList.remove("run");
   void bar.offsetWidth; // reflow
   bar.classList.add("run");
-  timer = window.setTimeout(timeout, DURATION_MS);
+  timer = window.setTimeout(timeout, dismissMs);
 }
 
 /** Pull the buffered PNG bytes and show them as the preview thumbnail. */
@@ -99,13 +119,19 @@ toast.addEventListener("mouseenter", () => {
 });
 toast.addEventListener("mouseleave", () => {
   if (done || toast.classList.contains("is-capturing")) return;
+  // Never mode has no timeout to resume.
+  if (dismissMs <= 0) return;
   bar.style.animationPlayState = "running";
   clearTimer();
-  timer = window.setTimeout(timeout, DURATION_MS);
+  timer = window.setTimeout(timeout, dismissMs);
 });
 
-void listen<Phase>("toast:phase", (e) => setPhase(e.payload));
+void listen<PhaseEvent>("toast:phase", (e) => {
+  dismissMs = e.payload.dismiss_ms;
+  setPhase(e.payload.phase);
+});
 
 // Initial phase comes from the URL hash the Rust builder set on first show.
+// The real dismiss_ms arrives with the first toast:phase event.
 const initial: Phase = window.location.hash === "#capturing" ? "capturing" : "ready";
 setPhase(initial);
