@@ -7,7 +7,7 @@ use tauri::{
 pub const TOAST_LABEL: &str = "toast";
 
 const TOAST_W: f64 = 360.0;
-const TOAST_H: f64 = 128.0;
+const TOAST_H: f64 = 168.0;
 const MARGIN: f64 = 20.0;
 
 /// Lifecycle phase the toast should render. `Capturing` is the instant,

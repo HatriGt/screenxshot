@@ -21,6 +21,7 @@ export default defineConfig({
         overlay: resolve(__dirname, "overlay.html"),
         settings: resolve(__dirname, "settings.html"),
         toast: resolve(__dirname, "toast.html"),
+        pin: resolve(__dirname, "pin.html"),
       },
     },
   },

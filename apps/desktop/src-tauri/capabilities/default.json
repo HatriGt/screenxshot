@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Base capability for the main ScreenXShot window.",
-  "windows": ["main", "overlay-*", "settings", "toast"],
+  "windows": ["main", "overlay-*", "settings", "toast", "pin"],
   "permissions": [
     "core:default",
     "core:window:default",
@@ -22,6 +22,10 @@
     "dialog:allow-save",
     "dialog:allow-open",
     "store:default",
-    "updater:default"
+    "updater:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://*" }]
+    }
   ]
 }

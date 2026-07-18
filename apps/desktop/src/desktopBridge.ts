@@ -2,7 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeImage } from "@tauri-apps/plugin-clipboard-manager";
-import { editor } from "@screenxshot/editor";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { editor, encodeHandoff, HANDOFF_PARAM } from "@screenxshot/editor";
 import { bytesToObjectUrl } from "./bytesToObjectUrl";
 import { needsNativeClipboard, needsNativeSave } from "./clipboardFallback";
 import { joinSavePath } from "./savePath";
@@ -150,6 +151,114 @@ export async function saveCurrentToFolder(): Promise<void> {
     filters: [{ name: format.toUpperCase(), extensions: [ext] }],
   });
   if (path) await invoke("save_capture_as", { path, bytes: Array.from(bytes) });
+}
+
+// Web host for "Continue on web" hand-off links. Single easy-to-change constant.
+const WEB_BASE = "https://screenxshot.com";
+
+/**
+ * Build the "Continue on web" URL for the current editor state.
+ *
+ * PRIVACY: only style + annotation ops are serialized — never the image bytes.
+ * The payload rides in a URL *fragment* (`#handoff=...`) which browsers never
+ * send to the server, so the screenshot never leaves the device. The web side
+ * re-prompts for the image and then replays the same style + ops on top.
+ */
+export function buildContinueOnWebUrl(): string {
+  const encoded = encodeHandoff({
+    style: editor.snapshotStyle(),
+    // The engine keeps ops as a plain JSON array; snapshot a deep copy so the
+    // encoded payload can't be mutated by later edits.
+    ops: JSON.parse(JSON.stringify(editor.ops ?? [])),
+  });
+  return `${WEB_BASE}/#${HANDOFF_PARAM}=${encoded}`;
+}
+
+/**
+ * Open the current editor state in the browser via a privacy-preserving
+ * hand-off URL (fragment-encoded style + ops, no image bytes).
+ */
+export async function continueOnWeb(): Promise<void> {
+  const url = buildContinueOnWebUrl();
+  try {
+    await openUrl(url);
+  } catch (err) {
+    console.error("continue on web failed", err);
+  }
+}
+
+/** Progress reported during a batch-beautify run. */
+export interface BatchProgress {
+  done: number;
+  total: number;
+  ok: number;
+  failed: number;
+}
+
+/** Outcome of a completed batch-beautify run. */
+export interface BatchResult {
+  ok: number;
+  failed: number;
+  cancelled: boolean;
+}
+
+/** Strip a path down to its filename stem (no directory, no extension). */
+function pathStem(path: string): string {
+  const name = path.split(/[\\/]/).filter(Boolean).pop() ?? "image";
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(0, dot) : name;
+}
+
+/**
+ * Batch beautify: pick multiple images, apply the persisted `default_style`
+ * headlessly to each via the shared editor's `exportStyledBlob`, and save each
+ * output into a chosen folder honoring `export_format`. Robust: per-file errors
+ * are counted, not fatal. Returns counts, or `cancelled` if the user backed out
+ * of either dialog.
+ */
+export async function batchBeautify(
+  onProgress?: (p: BatchProgress) => void,
+): Promise<BatchResult> {
+  const picked = await open({
+    multiple: true,
+    directory: false,
+    filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }],
+  });
+  const files = Array.isArray(picked) ? picked : picked ? [picked] : [];
+  if (files.length === 0) return { ok: 0, failed: 0, cancelled: true };
+
+  const outDir = await open({ directory: true, multiple: false });
+  if (typeof outDir !== "string") return { ok: 0, failed: 0, cancelled: true };
+
+  const settings = await invoke<Settings>("get_settings").catch(() => null);
+  const style = settings?.default_style ?? null;
+
+  let ok = 0;
+  let failed = 0;
+  for (let i = 0; i < files.length; i++) {
+    const path = files[i];
+    let url: string | undefined;
+    try {
+      const bytes = await invoke<ArrayBuffer>("read_image_file", { path });
+      url = bytesToObjectUrl(bytes);
+      const blob = await editor.exportStyledBlob(url, style);
+      const out = await blobToBytes(blob);
+      await invoke("batch_save", {
+        dir: outDir,
+        stem: `${pathStem(path)}-beautified`,
+        bytes: Array.from(out),
+      });
+      ok++;
+    } catch (err) {
+      console.error("batch beautify failed for", path, err);
+      failed++;
+    } finally {
+      if (url) URL.revokeObjectURL(url);
+    }
+    onProgress?.({ done: i + 1, total: files.length, ok, failed });
+  }
+
+  return { ok, failed, cancelled: false };
 }
 
 /** Persist the current editor look as the default style for auto-copy mode. */

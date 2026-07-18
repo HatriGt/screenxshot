@@ -164,6 +164,22 @@ body {
   background: rgba(255, 176, 92, 0.08);
 }
 
+/* Granted-capabilities list in the Privacy panel. */
+.caps {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.caps__item {
+  font: 500 11px/1 "JetBrains Mono", monospace;
+  color: var(--ink-2);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 7px;
+}
+
 /* Status dot for default-style state */
 .dot {
   width: 8px;

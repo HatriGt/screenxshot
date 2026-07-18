@@ -6,10 +6,13 @@ import { Studio, editorStore } from "@screenxshot/editor";
 import "@screenxshot/editor/styles.css";
 import "./desktop.css";
 import {
+  batchBeautify,
+  continueOnWeb,
   initDesktopBridge,
   saveCurrentStyleAsDefault,
   saveCurrentToFolder,
 } from "./desktopBridge";
+import type { BatchProgress } from "./desktopBridge";
 import { Titlebar } from "./Titlebar";
 
 // Desktop shell: a slim native titlebar (the window is frameless) above the
@@ -20,6 +23,34 @@ function App() {
   const hasImage = useStore(editorStore, (s) => s.hasImage);
   const [defaultSaved, setDefaultSaved] = useState(false);
   const [savedToFolder, setSavedToFolder] = useState(false);
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchStatus, setBatchStatus] = useState<string | null>(null);
+
+  async function onBatch() {
+    if (batchRunning) return;
+    setBatchRunning(true);
+    setBatchStatus(null);
+    try {
+      const result = await batchBeautify((p: BatchProgress) => {
+        setBatchStatus(`Beautifying ${p.done}/${p.total}…`);
+      });
+      if (result.cancelled) {
+        setBatchStatus(null);
+      } else {
+        setBatchStatus(
+          `Done — ${result.ok} saved` +
+            (result.failed > 0 ? `, ${result.failed} failed` : ""),
+        );
+        window.setTimeout(() => setBatchStatus(null), 4000);
+      }
+    } catch (err) {
+      console.error("batch beautify failed", err);
+      setBatchStatus("Batch failed");
+      window.setTimeout(() => setBatchStatus(null), 4000);
+    } finally {
+      setBatchRunning(false);
+    }
+  }
 
   async function onSetDefault() {
     await saveCurrentStyleAsDefault();
@@ -81,6 +112,39 @@ function App() {
               <span>{savedToFolder ? "Saved" : "Save"}</span>
             </button>
           )}
+
+          {hasImage && (
+            <button
+              type="button"
+              className="ds-fab ds-fab--ghost"
+              onClick={() => void continueOnWeb()}
+              title="Continue editing this in your browser (style + edits only — the image stays on your device)"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+                <circle cx="12" cy="12" r="9" />
+                <path d="M3 12h18M12 3c2.5 2.5 3.8 5.7 3.8 9S14.5 18.5 12 21c-2.5-2.5-3.8-5.7-3.8-9S9.5 5.5 12 3z" />
+              </svg>
+              <span>Continue on web</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            className="ds-fab ds-fab--ghost"
+            onClick={() => void onBatch()}
+            disabled={batchRunning}
+            title="Beautify a batch of images with your default style"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+              <rect x="3" y="3" width="7" height="7" rx="1.5" />
+              <rect x="14" y="3" width="7" height="7" rx="1.5" />
+              <rect x="3" y="14" width="7" height="7" rx="1.5" />
+              <rect x="14" y="14" width="7" height="7" rx="1.5" />
+            </svg>
+            <span>{batchRunning ? "Working…" : "Batch"}</span>
+          </button>
+
+          {batchStatus && <span className="ds-batch-status">{batchStatus}</span>}
 
           <button
             type="button"

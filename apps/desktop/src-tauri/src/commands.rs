@@ -300,6 +300,35 @@ pub fn auto_save_capture(app: AppHandle, bytes: Vec<u8>) -> Result<String, AppEr
     Ok(path.to_string_lossy().into_owned())
 }
 
+/// Read an image file's raw bytes for the batch-beautify pipeline. The webview
+/// turns these into an object URL and feeds them to the shared editor's
+/// `exportStyledBlob`. Returns the bytes via `Response` (no base64/JSON bloat).
+#[tauri::command]
+pub fn read_image_file(path: String) -> Result<Response, AppError> {
+    let bytes =
+        std::fs::read(&path).map_err(|e| AppError::Encode(format!("read {path}: {e}")))?;
+    Ok(Response::new(bytes))
+}
+
+/// Save styled PNG bytes into `dir` for the batch-beautify pipeline, re-encoding
+/// to the user's configured `export_format` and appending the right extension to
+/// `stem`. Returns the written path.
+#[tauri::command]
+pub fn batch_save(
+    app: AppHandle,
+    dir: String,
+    stem: String,
+    bytes: Vec<u8>,
+) -> Result<String, AppError> {
+    let format = crate::settings::load(&app).export_format;
+    let out = encode_for_export(&bytes, format)?;
+    let name = format!("{stem}.{}", format.extension());
+    let path = std::path::Path::new(&dir).join(name);
+    std::fs::write(&path, out)
+        .map_err(|e| AppError::Encode(format!("write {}: {e}", path.display())))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// Show the corner capture-confirmation toast.
 #[tauri::command]
 pub fn show_capture_toast(app: AppHandle) -> Result<(), AppError> {
@@ -339,6 +368,46 @@ pub fn toast_edit(app: AppHandle) -> Result<(), AppError> {
 #[tauri::command]
 pub fn toast_dismiss(app: AppHandle) -> Result<(), AppError> {
     crate::toast::hide_toast(&app)
+}
+
+/// Toast "Copy styled" action: hand the buffered raw capture to the main
+/// webview's styling pipeline (only JS can render styled bytes). Reuses the
+/// same `capture:auto` path as Copy-Styled auto-capture, keeping the editor
+/// hidden. The toast stays up (it's a quick action, not a dismiss).
+#[tauri::command]
+pub fn toast_copy_styled(app: AppHandle) -> Result<(), AppError> {
+    let settings = crate::settings::load(&app);
+    let payload = AutoCapturePayload {
+        mode: crate::settings::AfterCapture::CopyStyled,
+        style: settings.default_style,
+    };
+    if let Some(main) = app.get_webview_window("main") {
+        main.emit("capture:auto", payload)
+            .map_err(|e| AppError::Overlay(e.to_string()))?;
+    }
+    Ok(())
+}
+
+/// Toast "Pin" action: open the live editable pin on the buffered capture and
+/// dismiss the toast.
+#[tauri::command]
+pub fn toast_pin(app: AppHandle) -> Result<(), AppError> {
+    crate::toast::hide_toast(&app)?;
+    crate::pin::show_pin(&app)
+}
+
+/// Open the live editable pin window on the buffered capture. The pin's webview
+/// pulls the same `CaptureBuffer` bytes the editor/toast use (via
+/// `take_capture`) and hosts the shared editor for on-pin annotation + re-copy.
+#[tauri::command]
+pub fn pin_capture(app: AppHandle) -> Result<(), AppError> {
+    crate::pin::show_pin(&app)
+}
+
+/// Dismiss (hide) the pin window.
+#[tauri::command]
+pub fn pin_dismiss(app: AppHandle) -> Result<(), AppError> {
+    crate::pin::hide_pin(&app)
 }
 
 /// Local timestamp `YYYYMMDD-HHMMSS` for filenames, no external time crate.

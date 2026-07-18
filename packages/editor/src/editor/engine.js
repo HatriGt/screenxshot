@@ -7,6 +7,36 @@ import { editorStore, set } from "./store.js";
 
 const wallSrc = (w) => "data:image/svg+xml," + encodeURIComponent(w.svg);
 
+// Style keys that make up a portable preset (mirror of snapshotStyle / default_style).
+const PRESET_KEYS = ["color", "size", "frame", "padding", "srad", "shadow", "bg"];
+
+/**
+ * Displayed number for the badge op at `index` = its 1-based position among all
+ * `badge` ops in draw order. Numbering is DERIVED (not stored), so deleting or
+ * reordering badges auto-renumbers. Returns 0 if the op at `index` isn't a badge.
+ */
+export function badgeNumber(ops, index) {
+  if (!ops[index] || ops[index].type !== "badge") return 0;
+  let n = 0;
+  for (let i = 0; i <= index; i++) if (ops[i] && ops[i].type === "badge") n++;
+  return n;
+}
+
+/** Serialize a style-bearing state object into a portable, JSON-safe preset. */
+export function serializePreset(state) {
+  const p = {};
+  for (const k of PRESET_KEYS) p[k] = state[k];
+  return JSON.parse(JSON.stringify(p));
+}
+
+/** Merge a preset over a base style object, keeping base values for absent keys. */
+export function mergePreset(base, preset) {
+  const out = { ...base };
+  if (preset && typeof preset === "object")
+    for (const k of PRESET_KEYS) if (preset[k] != null) out[k] = preset[k];
+  return out;
+}
+
 export class Editor {
   constructor() {
     this.state = editorStore.state; // live reference; kept in sync via subscribe
@@ -295,7 +325,31 @@ export class Editor {
     c.closePath();
     c.fill();
   }
-  drawOp(c, o) {
+  // Curved arrow: quadratic curve from (x1,y1) to (x2,y2) with a perpendicular
+  // bow, plus an arrowhead aligned to the curve's tangent at the endpoint.
+  curveArrow(c, o) {
+    const mx = (o.x1 + o.x2) / 2,
+      my = (o.y1 + o.y2) / 2,
+      dx = o.x2 - o.x1,
+      dy = o.y2 - o.y1,
+      len = Math.hypot(dx, dy) || 1,
+      bow = len * 0.28,
+      cx = mx - (dy / len) * bow,
+      cy = my + (dx / len) * bow;
+    c.beginPath();
+    c.moveTo(o.x1, o.y1);
+    c.quadraticCurveTo(cx, cy, o.x2, o.y2);
+    c.stroke();
+    const ang = Math.atan2(o.y2 - cy, o.x2 - cx),
+      head = Math.max(o.w * 4.2, 14);
+    c.beginPath();
+    c.moveTo(o.x2, o.y2);
+    c.lineTo(o.x2 - head * Math.cos(ang - 0.42), o.y2 - head * Math.sin(ang - 0.42));
+    c.lineTo(o.x2 - head * Math.cos(ang + 0.42), o.y2 - head * Math.sin(ang + 0.42));
+    c.closePath();
+    c.fill();
+  }
+  drawOp(c, o, idx) {
     c.lineCap = "round";
     c.lineJoin = "round";
     c.strokeStyle = o.color;
@@ -319,9 +373,18 @@ export class Editor {
       c.stroke();
       c.globalCompositeOperation = "source-over";
     } else if (o.type === "arrow") this.arrow(c, o);
-    else if (o.type === "box") {
+    else if (o.type === "carrow") this.curveArrow(c, o);
+    else if (o.type === "line") {
+      c.beginPath();
+      c.moveTo(o.x1, o.y1);
+      c.lineTo(o.x2, o.y2);
+      c.stroke();
+    } else if (o.type === "box") {
       this.rr(c, o.x, o.y, o.w2, o.h2, Math.min(o.w * 1.6, o.w2 / 2, o.h2 / 2));
       c.stroke();
+    } else if (o.type === "frect") {
+      this.rr(c, o.x, o.y, o.w2, o.h2, Math.min(o.w * 1.6, o.w2 / 2, o.h2 / 2));
+      c.fill();
     } else if (o.type === "circle") {
       c.beginPath();
       c.ellipse(o.x + o.w2 / 2, o.y + o.h2 / 2, Math.max(o.w2 / 2, 1), Math.max(o.h2 / 2, 1), 0, 0, 7);
@@ -344,15 +407,43 @@ export class Editor {
         c.drawImage(this.tmp, 0, 0, tw, th, bx, by, bw, bh);
         c.imageSmoothingEnabled = true;
       }
+    } else if (o.type === "blur") {
+      const bx = Math.max(0, Math.round(o.x)),
+        by = Math.max(0, Math.round(o.y)),
+        bw = Math.max(1, Math.round(Math.min(o.w2, this.iw - bx))),
+        bh = Math.max(1, Math.round(Math.min(o.h2, this.ih - by)));
+      if (bw > 0 && bh > 0) {
+        const rad = Math.max(4, Math.round(Math.min(bw, bh) / 6));
+        this.tmp.width = bw;
+        this.tmp.height = bh;
+        this.tctx.clearRect(0, 0, bw, bh);
+        this.tctx.filter = `blur(${rad}px)`;
+        this.tctx.drawImage(this.imgCanvas, bx, by, bw, bh, 0, 0, bw, bh);
+        this.tctx.filter = "none";
+        c.drawImage(this.tmp, 0, 0, bw, bh, bx, by, bw, bh);
+      }
     } else if (o.type === "text") {
       c.textBaseline = "top";
       c.font = `700 ${o.px}px "Manrope",-apple-system,sans-serif`;
       o.text.split("\n").forEach((ln, i) => c.fillText(ln, o.x, o.y + i * o.px * 1.25));
+    } else if (o.type === "badge") {
+      const r = o.r || o.w * 5,
+        n = idx == null ? this.ops.filter((p) => p.type === "badge").length + 1 : badgeNumber(this.ops, idx);
+      c.beginPath();
+      c.arc(o.x, o.y, r, 0, 7);
+      c.fill();
+      c.fillStyle = "#fff";
+      c.textAlign = "center";
+      c.textBaseline = "middle";
+      c.font = `800 ${Math.round(r * 1.1)}px "Manrope",-apple-system,sans-serif`;
+      c.fillText(String(n), o.x, o.y + r * 0.04);
+      c.textAlign = "left";
+      c.textBaseline = "alphabetic";
     }
   }
   renderAnno() {
     this.actx.clearRect(0, 0, this.iw, this.ih);
-    for (const o of this.ops) this.drawOp(this.actx, o);
+    this.ops.forEach((o, i) => this.drawOp(this.actx, o, i));
     if (this.draft) this.drawOp(this.actx, this.draft);
   }
   paint() {
@@ -411,13 +502,17 @@ export class Editor {
       const pd = o.w * (o.type === "marker" ? 2 : 1) + 4;
       return { x: x0 - pd, y: y0 - pd, w: x1 - x0 + pd * 2, h: y1 - y0 + pd * 2 };
     }
-    if (o.type === "arrow") {
+    if (o.type === "arrow" || o.type === "carrow" || o.type === "line") {
       const x0 = Math.min(o.x1, o.x2),
         y0 = Math.min(o.y1, o.y2),
-        pd = o.w * 3 + 6;
+        pd = o.w * (o.type === "carrow" ? 6 : 3) + 6;
       return { x: x0 - pd, y: y0 - pd, w: Math.abs(o.x2 - o.x1) + pd * 2, h: Math.abs(o.y2 - o.y1) + pd * 2 };
     }
-    if (o.type === "box" || o.type === "circle" || o.type === "pixelate") {
+    if (o.type === "badge") {
+      const r = (o.r || o.w * 5) + 2;
+      return { x: o.x - r, y: o.y - r, w: r * 2, h: r * 2 };
+    }
+    if (o.type === "box" || o.type === "circle" || o.type === "pixelate" || o.type === "frect" || o.type === "blur") {
       const pd = (o.w || 2) + 3;
       return { x: o.x - pd, y: o.y - pd, w: o.w2 + pd * 2, h: o.h2 + pd * 2 };
     }
@@ -469,6 +564,10 @@ export class Editor {
         this.placeText(p);
         return;
       }
+      if (t === "badge") {
+        this.placeBadge(p);
+        return;
+      }
       canvas.setPointerCapture(e.pointerId);
       this.drawing = true;
       const w = this.strokeW();
@@ -477,9 +576,9 @@ export class Editor {
         this.cropDraft = { x: p.x, y: p.y, w: 0, h: 0 };
       } else if (t === "pen" || t === "marker" || t === "eraser")
         this.draft = { type: t === "eraser" ? "erase" : t, color: this.state.color, w, points: [p] };
-      else if (t === "arrow")
-        this.draft = { type: "arrow", color: this.state.color, w, x1: p.x, y1: p.y, x2: p.x, y2: p.y };
-      else if (t === "box" || t === "circle" || t === "pixelate")
+      else if (t === "arrow" || t === "carrow" || t === "line")
+        this.draft = { type: t, color: this.state.color, w, x1: p.x, y1: p.y, x2: p.x, y2: p.y };
+      else if (t === "box" || t === "circle" || t === "pixelate" || t === "frect" || t === "blur")
         this.draft = { type: t, color: this.state.color, w, x0: p.x, y0: p.y, x: p.x, y: p.y, w2: 0, h2: 0 };
       this.paint();
     };
@@ -512,10 +611,10 @@ export class Editor {
         };
       else if (this.draft && (this.draft.type === "pen" || this.draft.type === "marker" || this.draft.type === "erase"))
         this.draft.points.push(p);
-      else if (this.draft && this.draft.type === "arrow") {
+      else if (this.draft && (this.draft.type === "arrow" || this.draft.type === "carrow" || this.draft.type === "line")) {
         this.draft.x2 = p.x;
         this.draft.y2 = p.y;
-      } else if (this.draft && (this.draft.type === "box" || this.draft.type === "circle" || this.draft.type === "pixelate")) {
+      } else if (this.draft && (this.draft.type === "box" || this.draft.type === "circle" || this.draft.type === "pixelate" || this.draft.type === "frect" || this.draft.type === "blur")) {
         this.draft.x = Math.min(this.draft.x0, p.x);
         this.draft.y = Math.min(this.draft.y0, p.y);
         this.draft.w2 = Math.abs(p.x - this.draft.x0);
@@ -546,7 +645,7 @@ export class Editor {
       if (this.draft) {
         if (this.draft.type === "pen" || this.draft.type === "marker" || this.draft.type === "erase")
           ok = this.draft.points.length > 0;
-        else if (this.draft.type === "arrow") ok = Math.hypot(this.draft.x2 - this.draft.x1, this.draft.y2 - this.draft.y1) > 4;
+        else if (this.draft.type === "arrow" || this.draft.type === "carrow" || this.draft.type === "line") ok = Math.hypot(this.draft.x2 - this.draft.x1, this.draft.y2 - this.draft.y1) > 4;
         else ok = this.draft.w2 > 3 && this.draft.h2 > 3;
       }
       if (ok) {
@@ -568,7 +667,7 @@ export class Editor {
         }
       }
     };
-    const KEY = { v: "cursor", p: "pen", h: "marker", a: "arrow", r: "box", o: "circle", t: "text", e: "eraser", c: "crop", x: "pixelate" };
+    const KEY = { v: "cursor", p: "pen", h: "marker", a: "arrow", d: "carrow", l: "line", r: "box", f: "frect", o: "circle", t: "text", n: "badge", e: "eraser", c: "crop", x: "pixelate", b: "blur" };
     const onKey = (e) => {
       const meta = e.metaKey || e.ctrlKey;
       if (meta) {
@@ -716,6 +815,12 @@ export class Editor {
       }
     });
     el.addEventListener("blur", commit);
+  }
+  placeBadge(p) {
+    const w = this.strokeW();
+    this.pushUndo();
+    this.ops.push({ type: "badge", color: this.state.color, w, x: p.x, y: p.y, r: Math.max(w * 5, 14) });
+    this.paint();
   }
   showCropBar() {
     this.cropbar.style.display = "flex";
@@ -924,6 +1029,24 @@ export class Editor {
     };
   }
 
+  /** Export the current look as a portable, JSON-serializable style preset. */
+  exportPreset() {
+    return serializePreset(this.state);
+  }
+
+  /**
+   * Apply a portable style preset via the existing setBg/applySetting paths
+   * (same mechanism default_style uses). Absent keys keep their current value.
+   */
+  applyPreset(preset) {
+    const merged = mergePreset(this.snapshotStyle(), preset);
+    if (merged.bg != null) set({ bg: merged.bg });
+    for (const k of ["color", "size", "frame", "padding", "srad", "shadow"])
+      if (merged[k] != null) set({ [k]: merged[k] });
+    this.buildBase();
+    this.paint();
+  }
+
   /**
    * Headlessly render `src` with the given style applied and return a PNG Blob.
    * Reuses the full beautify pipeline on a throwaway offscreen engine so the
@@ -997,7 +1120,7 @@ export class Editor {
     this.hideSelbar();
     set({ tool: t });
     if (this.canvas) {
-      this.canvas.classList.toggle("draw", ["pen", "marker", "arrow", "box", "circle", "eraser", "crop", "pixelate"].includes(t));
+      this.canvas.classList.toggle("draw", ["pen", "marker", "arrow", "carrow", "line", "box", "frect", "circle", "badge", "eraser", "crop", "pixelate", "blur"].includes(t));
       this.canvas.classList.toggle("textc", t === "text");
     }
   }

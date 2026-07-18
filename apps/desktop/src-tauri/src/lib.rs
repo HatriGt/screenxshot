@@ -2,6 +2,7 @@ mod capture;
 mod commands;
 mod error;
 mod overlay;
+mod pin;
 mod settings;
 mod toast;
 
@@ -71,7 +72,8 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_store::Builder::new().build());
+        .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_opener::init());
 
     #[cfg(desktop)]
     {
@@ -95,6 +97,8 @@ pub fn run() {
             // Same warm-up for the toast so its first show is instant instead
             // of paying the webview build + JS load cost inline on capture.
             toast::precreate_toast(app.handle());
+            // Warm up the pin window (hidden) so the first pin is instant.
+            pin::precreate_pin(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -136,6 +140,12 @@ pub fn run() {
             commands::toast_preview,
             commands::toast_edit,
             commands::toast_dismiss,
+            commands::toast_copy_styled,
+            commands::toast_pin,
+            commands::pin_capture,
+            commands::pin_dismiss,
+            commands::read_image_file,
+            commands::batch_save,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -187,10 +197,20 @@ fn build_app_menu(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Erro
 
 fn build_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let capture_item = MenuItem::with_id(app, "capture", "Capture region", true, None::<&str>)?;
+    let pin_item = MenuItem::with_id(app, "pin", "Pin last capture", true, None::<&str>)?;
     let show_item = MenuItem::with_id(app, "show", "Open ScreenXShot", true, None::<&str>)?;
     let settings_item = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show_item, &capture_item, &settings_item, &quit_item])?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &show_item,
+            &capture_item,
+            &pin_item,
+            &settings_item,
+            &quit_item,
+        ],
+    )?;
 
     TrayIconBuilder::new()
         .icon(app.default_window_icon().unwrap().clone())
@@ -212,6 +232,11 @@ fn build_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> 
         .on_menu_event(|app, event| match event.id.as_ref() {
             "capture" => {
                 let _ = overlay::show_overlay(app);
+            }
+            "pin" => {
+                if let Err(e) = pin::show_pin(app) {
+                    eprintln!("warning: pin last capture failed: {e}");
+                }
             }
             "show" => {
                 if let Err(e) = show_main_window(app) {

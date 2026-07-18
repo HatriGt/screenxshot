@@ -1,7 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { writeImage } from "@tauri-apps/plugin-clipboard-manager";
 
 const DEFAULT_DURATION_MS = 5000;
+
+/** Actions offered by the toast's inline buttons. */
+type ToastAction = "copy" | "copy-styled" | "pin" | "edit";
 
 type Phase = "capturing" | "ready";
 
@@ -16,7 +20,9 @@ interface PhaseEvent {
 // Configured auto-dismiss timeout in ms; 0 = Never. Updated on each phase event.
 let dismissMs = DEFAULT_DURATION_MS;
 
-const toast = document.getElementById("toast") as HTMLButtonElement;
+const toast = document.getElementById("toast") as HTMLElement;
+const body = document.getElementById("toastbody") as HTMLElement;
+const actions = document.getElementById("toastactions") as HTMLElement;
 const bar = document.getElementById("toastbar") as HTMLElement;
 const title = document.getElementById("toasttitle") as HTMLElement;
 const hint = document.getElementById("toasthint") as HTMLElement;
@@ -54,6 +60,41 @@ function edit(): void {
   done = true;
   clearTimer();
   void invoke("toast_edit").catch((err) => console.error("toast edit failed", err));
+}
+
+/** Copy the raw buffered PNG straight to the clipboard from the toast. */
+async function copyRaw(): Promise<void> {
+  const bytes = await invoke<ArrayBuffer>("toast_preview");
+  await writeImage(new Uint8Array(bytes));
+}
+
+/** Run an inline toast action. Copy/Copy-styled keep the toast up (quick
+ * actions); Pin/Edit hand off to another window and end the toast's lifecycle
+ * (Rust hides it). */
+function runAction(action: ToastAction): void {
+  switch (action) {
+    case "copy":
+      void copyRaw().catch((err) => console.error("toast copy failed", err));
+      return;
+    case "copy-styled":
+      void invoke("toast_copy_styled").catch((err) =>
+        console.error("toast copy styled failed", err),
+      );
+      return;
+    case "pin":
+      if (done) return;
+      done = true;
+      clearTimer();
+      void invoke("toast_pin").catch((err) => console.error("toast pin failed", err));
+      return;
+    case "edit":
+      edit();
+      return;
+    default: {
+      const _never: never = action;
+      return _never;
+    }
+  }
 }
 
 function startCountdown(): void {
@@ -110,7 +151,19 @@ function setPhase(phase: Phase): void {
   }
 }
 
-toast.addEventListener("click", edit);
+// The main body opens the editor; the action row has its own buttons.
+body.addEventListener("click", edit);
+body.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    edit();
+  }
+});
+actions.addEventListener("click", (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLElement>("[data-action]");
+  if (!btn) return;
+  runAction(btn.dataset.action as ToastAction);
+});
 // Pause the countdown while hovering so the user has time to decide.
 toast.addEventListener("mouseenter", () => {
   if (toast.classList.contains("is-capturing")) return;

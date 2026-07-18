@@ -1,0 +1,89 @@
+/* Live editable pin window: a compact always-on-top mini-editor. Reuses the
+   desktop shell's dark tokens (.ds-shell) + the shared editor, with a slim
+   draggable bar and Copy/Dismiss actions. */
+
+.pin-shell {
+  height: 100vh;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+
+/* Slim draggable bar with the pin actions. */
+.pin-bar {
+  height: 34px;
+  flex: 0 0 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 12px;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+}
+.pin-bar__grip {
+  width: 22px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-2);
+}
+.pin-bar__title {
+  font: 600 12px/1 "Inter", system-ui, sans-serif;
+  color: var(--ink-2);
+}
+.pin-bar__actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pin-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 24px;
+  padding: 4px 10px;
+  font: 600 12px/1 "Inter", system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--paper-2);
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.13s, border-color 0.13s, color 0.13s;
+}
+.pin-btn:hover {
+  border-color: var(--accent);
+}
+.pin-btn.is-ok {
+  color: #6fd99a;
+  border-color: rgba(111, 217, 154, 0.5);
+  background: rgba(111, 217, 154, 0.12);
+}
+.pin-btn--close {
+  padding: 4px 6px;
+  color: var(--ink-2);
+}
+.pin-btn--close svg {
+  width: 12px;
+  height: 12px;
+}
+.pin-btn--close:hover {
+  background: #e0443e;
+  border-color: #e0443e;
+  color: #fff;
+}
+.pin-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* In the tiny pin window, hide the wallpaper side panel so the stage gets the
+   full width — the pin is for quick on-image annotation, not full beautify. */
+.pin-shell .panel {
+  display: none;
+}
+.pin-shell .stage {
+  padding: 12px;
+}

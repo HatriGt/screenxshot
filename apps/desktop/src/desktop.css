@@ -264,6 +264,19 @@ body,
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+.ds-fab:disabled {
+  opacity: 0.6;
+  cursor: default;
+  transform: none;
+}
+
+/* Batch-beautify progress/result text next to the Batch action. */
+.ds-batch-status {
+  font: 500 12px/1 "Inter", system-ui, sans-serif;
+  color: var(--ink-2);
+  padding: 0 4px;
+  white-space: nowrap;
+}
 
 /* ---------------------------------------------------------------------------
    Right panel + wallpaper grid — dark; only .walls scrolls.

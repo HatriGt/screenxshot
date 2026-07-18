@@ -13,6 +13,7 @@
     "./store": "./src/editor/store.js",
     "./data": "./src/editor/data.js",
     "./instance": "./src/editor/instance.js",
+    "./handoff": "./src/editor/handoff.js",
     "./entitlements": "./src/entitlements.js",
     "./styles.css": "./src/styles.css",
     "./components/Studio": "./src/components/Studio.jsx",

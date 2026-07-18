@@ -10,7 +10,18 @@ import type {
   Settings,
   ToastPosition,
 } from "./types";
+import capability from "../../src-tauri/capabilities/default.json";
 import "./settings.css";
+
+// Read the ACTUAL granted capabilities so the Privacy panel reflects the
+// bundle, not a hardcoded promise. A permission is "network" if its identifier
+// mentions http/network — the app declares none, which is what makes the
+// "screenshots never leave the device" claim auditable rather than marketing.
+const GRANTED_PERMISSIONS: string[] = capability.permissions;
+const NETWORK_PERMISSIONS = GRANTED_PERMISSIONS.filter((p) =>
+  /(^|:)(http|network)/i.test(p),
+);
+const DECLARES_NETWORK = NETWORK_PERMISSIONS.length > 0;
 
 interface ToggleProps {
   checked: boolean;
@@ -306,6 +317,39 @@ function SettingsApp() {
               checked={s.tray_closes_to_tray}
               onChange={(v) => patch({ tray_closes_to_tray: v })}
             />
+          </div>
+        </div>
+
+        <p className="grp__label">Privacy</p>
+        <div className="grp">
+          <div className="item">
+            <div className="item__text">
+              <span className="item__label">Screenshots stay on this device</span>
+              <span className="item__sub">
+                {DECLARES_NETWORK
+                  ? "This build declares network access."
+                  : "This build declares no network capability — nothing is uploaded."}
+              </span>
+            </div>
+            <div className="item__control">
+              <span className={"dot" + (DECLARES_NETWORK ? "" : " dot--on")} />
+              <span className="item__state">
+                {DECLARES_NETWORK ? "Network declared" : "No network"}
+              </span>
+            </div>
+          </div>
+          <div className="item item--col">
+            <div className="item__row">
+              <span className="item__label">Granted capabilities</span>
+              <span className="item__state">{GRANTED_PERMISSIONS.length}</span>
+            </div>
+            <ul className="caps">
+              {GRANTED_PERMISSIONS.map((p) => (
+                <li key={p} className="caps__item">
+                  {p}
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
       </main>
