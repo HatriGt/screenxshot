@@ -127,9 +127,16 @@ export async function initDesktopBridge(): Promise<() => void> {
       console.error("auto capture failed", err),
     );
   });
+  // Tray "Recents" click: open the chosen saved capture in the editor.
+  const unHistory = await listen<string>("history:open", (e) => {
+    openHistoryInEditor(e.payload).catch((err) =>
+      console.error("history open failed", err),
+    );
+  });
   return () => {
     unReady();
     unAuto();
+    unHistory();
   };
 }
 
@@ -182,8 +189,12 @@ export async function continueOnWeb(): Promise<void> {
   const url = buildContinueOnWebUrl();
   try {
     await openUrl(url);
+    editor.flash("Opened in browser");
   } catch (err) {
     console.error("continue on web failed", err);
+    // Surface the failure to the user instead of silently swallowing it — the
+    // click otherwise does nothing visible on failure.
+    editor.flash("Couldn't open browser");
   }
 }
 
@@ -271,6 +282,72 @@ export async function batchBeautify(
   }
 
   return { ok, failed, cancelled: false, usedPlainStyle };
+}
+
+/**
+ * Export a style preset to a `.json` file the user chooses. Writes the JSON
+ * verbatim via the `save_text_file` Rust command (the image-save commands force
+ * an export-format re-encode, so they can't be reused for text).
+ */
+export async function exportPresetToFile(preset: unknown): Promise<void> {
+  const path = await save({
+    defaultPath: `screenxshot-preset-${Date.now()}.json`,
+    filters: [{ name: "JSON", extensions: ["json"] }],
+  });
+  if (!path) return;
+  await invoke("save_text_file", { path, text: JSON.stringify(preset, null, 2) });
+}
+
+/**
+ * Pick a `.json` preset file and parse it. Reuses `read_image_file` (a plain
+ * `fs::read`) to get the raw bytes, then decodes UTF-8 + JSON. Returns the
+ * parsed preset, or null if the user cancelled.
+ */
+export async function importPresetFromFile(): Promise<unknown | null> {
+  const picked = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: "JSON", extensions: ["json"] }],
+  });
+  if (typeof picked !== "string") return null;
+  const bytes = await invoke<ArrayBuffer>("read_image_file", { path: picked });
+  const text = new TextDecoder().decode(new Uint8Array(bytes));
+  return JSON.parse(text);
+}
+
+/** One saved-capture record from the Rust history index. */
+export interface HistoryEntry {
+  path: string;
+  /** Unix seconds (UTC) at save time. */
+  timestamp: number;
+  width?: number;
+  height?: number;
+  /** True when the file no longer exists on disk. */
+  missing: boolean;
+}
+
+/** Read the capture-history index (most-recent first). */
+export async function getHistory(): Promise<HistoryEntry[]> {
+  return invoke<HistoryEntry[]>("get_history");
+}
+
+/** Clear the entire capture-history index. */
+export async function clearHistory(): Promise<void> {
+  await invoke("clear_history");
+}
+
+/**
+ * Load a saved capture from disk into the editor. Reuses the same
+ * bytes -> object URL -> editor.fromSrc path as fresh captures.
+ */
+export async function openHistoryInEditor(path: string): Promise<void> {
+  const bytes = await invoke<ArrayBuffer>("read_image_file", { path });
+  const url = bytesToObjectUrl(bytes);
+  editor.fromSrc(url);
+  const probe = new Image();
+  probe.onload = () => URL.revokeObjectURL(url);
+  probe.onerror = () => URL.revokeObjectURL(url);
+  probe.src = url;
 }
 
 /** Persist the current editor look as the default style for auto-copy mode. */

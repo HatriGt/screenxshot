@@ -165,6 +165,10 @@ fn auto_save_bytes(app: &AppHandle, bytes: &[u8]) -> Result<(), AppError> {
     let path = std::path::Path::new(&settings.save_dir).join(name);
     std::fs::write(&path, out)
         .map_err(|e| AppError::Encode(format!("write {}: {e}", path.display())))?;
+    // Index the save for the history panel + tray Recents (best-effort).
+    if let Err(e) = crate::history::record_save(app, &path.to_string_lossy(), Some(bytes)) {
+        eprintln!("history record failed: {e}");
+    }
     Ok(())
 }
 
@@ -297,7 +301,12 @@ pub fn auto_save_capture(app: AppHandle, bytes: Vec<u8>) -> Result<String, AppEr
     let path = std::path::Path::new(&settings.save_dir).join(name);
     std::fs::write(&path, out)
         .map_err(|e| AppError::Encode(format!("write {}: {e}", path.display())))?;
-    Ok(path.to_string_lossy().into_owned())
+    let path_str = path.to_string_lossy().into_owned();
+    // Index the save for the history panel + tray Recents (best-effort).
+    if let Err(e) = crate::history::record_save(&app, &path_str, Some(&bytes)) {
+        eprintln!("history record failed: {e}");
+    }
+    Ok(path_str)
 }
 
 /// Read an image file's raw bytes for the batch-beautify pipeline. The webview
@@ -308,6 +317,14 @@ pub fn read_image_file(path: String) -> Result<Response, AppError> {
     let bytes =
         std::fs::read(&path).map_err(|e| AppError::Encode(format!("read {path}: {e}")))?;
     Ok(Response::new(bytes))
+}
+
+/// Write UTF-8 text to an explicit path verbatim (no image re-encoding). Used to
+/// save a style preset as a `.json` file. Kept minimal and separate from the
+/// image-writing commands, which force an `export_format` re-encode.
+#[tauri::command]
+pub fn save_text_file(path: String, text: String) -> Result<(), AppError> {
+    std::fs::write(&path, text).map_err(|e| AppError::Encode(format!("write {path}: {e}")))
 }
 
 /// Save styled PNG bytes into `dir` for the batch-beautify pipeline, re-encoding

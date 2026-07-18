@@ -16,9 +16,12 @@
     "./handoff": "./src/editor/handoff.js",
     "./entitlements": "./src/entitlements.js",
     "./styles.css": "./src/styles.css",
+    "./presets": "./src/editor/presets.js",
     "./components/Studio": "./src/components/Studio.jsx",
     "./components/Dock": "./src/components/Dock.jsx",
     "./components/Panel": "./src/components/Panel.jsx",
+    "./components/Cheatsheet": "./src/components/Cheatsheet.jsx",
+    "./components/Gallery": "./src/components/Gallery.jsx",
     "./hooks/useReveal": "./src/hooks/useReveal.js",
     "./hooks/useParallax": "./src/hooks/useParallax.js"
   },

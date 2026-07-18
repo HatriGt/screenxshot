@@ -1,12 +1,16 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "@tanstack/react-store";
 import { editorStore } from "../editor/store.js";
 import { editor } from "../editor/instance.js";
 import Dock from "./Dock.jsx";
 import Panel from "./Panel.jsx";
+import Cheatsheet from "./Cheatsheet.jsx";
+import Gallery from "./Gallery.jsx";
 
-export default function Studio() {
+export default function Studio({ onExportPreset, onImportPreset } = {}) {
   const { hasImage, copyLabel } = useStore(editorStore);
+  const [cheatOpen, setCheatOpen] = useState(false);
+  const [galleryOpen, setGalleryOpen] = useState(false);
   const canvasRef = useRef(null);
   const stageRef = useRef(null);
   const dropRef = useRef(null);
@@ -26,6 +30,19 @@ export default function Studio() {
       fileInput: fileRef.current,
     });
     return () => editor.unmount();
+  }, []);
+
+  // Global `?` opens the shortcut cheatsheet (ignored while typing in a field).
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== "?" || e.metaKey || e.ctrlKey) return;
+      const el = document.activeElement;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.classList.contains("textin"))) return;
+      e.preventDefault();
+      setCheatOpen((v) => !v);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
   }, []);
 
   const show = hasImage ? " show" : "";
@@ -77,7 +94,16 @@ export default function Studio() {
 
           <div className="studio">
             <div className="stage" id="stage" ref={stageRef}>
-              <Dock />
+              <Dock
+                onCheatsheet={() => setCheatOpen((v) => !v)}
+                onGallery={() => setGalleryOpen((v) => !v)}
+              />
+              <Gallery
+                open={galleryOpen && hasImage}
+                onClose={() => setGalleryOpen(false)}
+                onExport={onExportPreset}
+                onImport={onImportPreset}
+              />
 
               <div className={"replace" + show} id="replaceWrap">
                 <button id="replace" data-tip="Replace screenshot" title="Replace screenshot" onClick={() => editor.pick()}>
@@ -152,6 +178,8 @@ export default function Studio() {
         </button>
       </div>
       <input type="file" id="file" accept="image/*" hidden ref={fileRef} />
+
+      <Cheatsheet open={cheatOpen} onClose={() => setCheatOpen(false)} />
     </div>
   );
 }

@@ -8,12 +8,15 @@ import "./desktop.css";
 import {
   batchBeautify,
   continueOnWeb,
+  exportPresetToFile,
+  importPresetFromFile,
   initDesktopBridge,
   saveCurrentStyleAsDefault,
   saveCurrentToFolder,
 } from "./desktopBridge";
 import type { BatchProgress } from "./desktopBridge";
 import { Titlebar } from "./Titlebar";
+import { HistoryPanel } from "./HistoryPanel";
 
 // Desktop shell: a slim native titlebar (the window is frameless) above the
 // shared editor, which fills the whole window. The editor's Copy/Save controls
@@ -25,6 +28,7 @@ function App() {
   const [savedToFolder, setSavedToFolder] = useState(false);
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchStatus, setBatchStatus] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   async function onBatch() {
     if (batchRunning) return;
@@ -71,7 +75,9 @@ function App() {
     <div className="ds-shell">
       <Titlebar />
       <div className="ds-body">
-        <Studio />
+        <Studio onExportPreset={exportPresetToFile} onImportPreset={importPresetFromFile} />
+
+        {historyOpen && <HistoryPanel onClose={() => setHistoryOpen(false)} />}
 
         <div className="ds-fabs">
           {hasImage && (
@@ -130,6 +136,20 @@ function App() {
               <span>Continue on web</span>
             </button>
           )}
+
+          <button
+            type="button"
+            className={"ds-fab ds-fab--ghost" + (historyOpen ? " is-ok" : "")}
+            onClick={() => setHistoryOpen((v) => !v)}
+            title="Browse recently saved captures"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+              <path d="M12 8v4l3 2" />
+              <path d="M3.05 11a9 9 0 111.5 6" />
+              <path d="M3 3v5h5" />
+            </svg>
+            <span>Recents</span>
+          </button>
 
           <button
             type="button"

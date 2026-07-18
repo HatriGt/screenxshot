@@ -10,6 +10,42 @@ const wallSrc = (w) => "data:image/svg+xml," + encodeURIComponent(w.svg);
 // Style keys that make up a portable preset (mirror of snapshotStyle / default_style).
 const PRESET_KEYS = ["color", "size", "frame", "padding", "srad", "shadow", "bg"];
 
+// Single source of truth for tool keyboard shortcuts: key -> tool id. Consumed by
+// the editor's keydown handler AND the shortcut cheatsheet overlay so they stay
+// in sync. Insertion order defines the cheatsheet's listing order.
+export const KEY = { v: "cursor", p: "pen", h: "marker", a: "arrow", d: "carrow", l: "line", r: "box", f: "frect", o: "circle", t: "text", n: "badge", e: "eraser", c: "crop", x: "pixelate", b: "blur" };
+
+// Human-readable label for each tool id (for the shortcut cheatsheet).
+const TOOL_LABELS = {
+  cursor: "Select",
+  pen: "Pen",
+  marker: "Highlight",
+  arrow: "Arrow",
+  carrow: "Curved arrow",
+  line: "Line",
+  box: "Box",
+  frect: "Filled box",
+  circle: "Ellipse",
+  text: "Text",
+  badge: "Badge",
+  eraser: "Eraser",
+  crop: "Crop",
+  pixelate: "Pixelate",
+  blur: "Blur",
+};
+
+/**
+ * Derive cheatsheet rows from the `KEY` map so the overlay stays in sync with
+ * the actual shortcuts. Returns `{ key, tool, label }[]` in KEY insertion order.
+ */
+export function cheatsheetRows() {
+  return Object.entries(KEY).map(([key, tool]) => ({
+    key: key.toUpperCase(),
+    tool,
+    label: TOOL_LABELS[tool] || tool,
+  }));
+}
+
 /**
  * Displayed number for the badge op at `index` = its 1-based position among all
  * `badge` ops in draw order. Numbering is DERIVED (not stored), so deleting or
@@ -667,7 +703,6 @@ export class Editor {
         }
       }
     };
-    const KEY = { v: "cursor", p: "pen", h: "marker", a: "arrow", d: "carrow", l: "line", r: "box", f: "frect", o: "circle", t: "text", n: "badge", e: "eraser", c: "crop", x: "pixelate", b: "blur" };
     const onKey = (e) => {
       const meta = e.metaKey || e.ctrlKey;
       if (meta) {

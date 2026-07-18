@@ -1,6 +1,7 @@
 mod capture;
 mod commands;
 mod error;
+mod history;
 mod overlay;
 mod pin;
 mod settings;
@@ -8,11 +9,17 @@ mod toast;
 
 pub use error::AppError;
 
+use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
-    tray::{TrayIconBuilder, TrayIconEvent},
+    tray::{TrayIcon, TrayIconBuilder, TrayIconEvent},
     AppHandle, LogicalPosition, Manager, WindowEvent,
 };
+
+/// Holds the tray icon so its menu (esp. the "Recents" submenu) can be rebuilt
+/// after new captures are saved.
+#[derive(Default)]
+pub struct TrayHandle(pub Mutex<Option<TrayIcon>>);
 
 /// Bring the main window to the front, centered on the primary monitor.
 ///
@@ -68,6 +75,7 @@ fn show_main_window(app: &AppHandle) -> Result<(), AppError> {
 pub fn run() {
     let mut builder = tauri::Builder::default()
         .manage(commands::CaptureBuffer::default())
+        .manage(TrayHandle::default())
         .plugin(build_global_shortcut())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
@@ -145,7 +153,10 @@ pub fn run() {
             commands::pin_capture,
             commands::pin_dismiss,
             commands::read_image_file,
+            commands::save_text_file,
             commands::batch_save,
+            history::get_history,
+            history::clear_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -195,24 +206,104 @@ fn build_app_menu(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
-fn build_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+/// Prefix for tray "Recents" menu-item ids; the suffix is the history index.
+const RECENT_ID_PREFIX: &str = "recent-";
+/// How many recent captures the tray "Recents" submenu lists.
+const TRAY_RECENTS: usize = 5;
+
+/// Build the tray "Recents" submenu from the capture history. Empty history
+/// yields a single disabled placeholder so the submenu is never empty.
+fn build_recents_submenu(app: &tauri::AppHandle) -> Result<Submenu<tauri::Wry>, Box<dyn std::error::Error>> {
+    let recents = history::recent(app, TRAY_RECENTS);
+    if recents.is_empty() {
+        let empty = MenuItem::with_id(app, "recent-empty", "No recent captures", false, None::<&str>)?;
+        return Ok(Submenu::with_items(app, "Recents", true, &[&empty])?);
+    }
+    let mut items: Vec<MenuItem<tauri::Wry>> = Vec::with_capacity(recents.len());
+    for (i, entry) in recents.iter().enumerate() {
+        let label = recent_label(entry);
+        items.push(MenuItem::with_id(
+            app,
+            format!("{RECENT_ID_PREFIX}{i}"),
+            label,
+            true,
+            None::<&str>,
+        )?);
+    }
+    let refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+        items.iter().map(|m| m as &dyn tauri::menu::IsMenuItem<tauri::Wry>).collect();
+    Ok(Submenu::with_items(app, "Recents", true, &refs)?)
+}
+
+/// Short label for a recents menu item: the file's base name.
+fn recent_label(entry: &history::HistoryEntry) -> String {
+    std::path::Path::new(&entry.path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| entry.path.clone())
+}
+
+/// Open the history entry at `index` in the editor: reveal the main window and
+/// emit `history:open` with its path so the webview loads the file bytes.
+fn open_recent(app: &tauri::AppHandle, index: usize) {
+    use tauri::Emitter;
+    let recents = history::recent(app, TRAY_RECENTS);
+    let Some(entry) = recents.get(index) else {
+        return;
+    };
+    if let Err(e) = show_main_window(app) {
+        eprintln!("warning: show main window failed: {e}");
+    }
+    if let Err(e) = app.emit("history:open", entry.path.clone()) {
+        eprintln!("warning: emit history:open failed: {e}");
+    }
+}
+
+/// Build the full tray menu (including the dynamic Recents submenu).
+fn build_tray_menu(app: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, Box<dyn std::error::Error>> {
     let capture_item = MenuItem::with_id(app, "capture", "Capture region", true, None::<&str>)?;
     let pin_item = MenuItem::with_id(app, "pin", "Pin last capture", true, None::<&str>)?;
     let show_item = MenuItem::with_id(app, "show", "Open ScreenXShot", true, None::<&str>)?;
+    let recents_submenu = build_recents_submenu(app)?;
     let settings_item = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(
+    Ok(Menu::with_items(
         app,
         &[
             &show_item,
             &capture_item,
             &pin_item,
+            &recents_submenu,
             &settings_item,
             &quit_item,
         ],
-    )?;
+    )?)
+}
 
-    TrayIconBuilder::new()
+/// Rebuild the tray menu so the Recents submenu reflects the latest history.
+/// Best-effort: a missing tray or menu-build error is logged, never fatal.
+pub fn refresh_tray_recents(app: &tauri::AppHandle) {
+    let Some(state) = app.try_state::<TrayHandle>() else {
+        return;
+    };
+    let guard = state.0.lock().unwrap();
+    let Some(tray) = guard.as_ref() else {
+        return;
+    };
+    match build_tray_menu(app) {
+        Ok(menu) => {
+            if let Err(e) = tray.set_menu(Some(menu)) {
+                eprintln!("warning: refresh tray recents failed: {e}");
+            }
+        }
+        Err(e) => eprintln!("warning: rebuild tray menu failed: {e}"),
+    }
+}
+
+fn build_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let menu = build_tray_menu(app)?;
+
+    let tray = TrayIconBuilder::new()
         .icon(app.default_window_icon().unwrap().clone())
         .tooltip("ScreenXShot")
         .menu(&menu)
@@ -247,8 +338,18 @@ fn build_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> 
                 let _ = settings::open_settings_window(app);
             }
             "quit" => app.exit(0),
-            _ => {}
+            id => {
+                if let Some(idx) = id
+                    .strip_prefix(RECENT_ID_PREFIX)
+                    .and_then(|n| n.parse::<usize>().ok())
+                {
+                    open_recent(app, idx);
+                }
+            }
         })
         .build(app)?;
+    if let Some(state) = app.try_state::<TrayHandle>() {
+        *state.0.lock().unwrap() = Some(tray);
+    }
     Ok(())
 }
