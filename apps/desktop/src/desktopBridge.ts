@@ -221,7 +221,9 @@ function pathStem(path: string): string {
 export async function batchBeautify(
   onProgress?: (p: BatchProgress) => void,
 ): Promise<BatchResult> {
+  // Step 1 of 2 — choose the screenshots to beautify.
   const picked = await open({
+    title: "Batch beautify — Step 1 of 2: choose screenshots",
     multiple: true,
     directory: false,
     filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }],
@@ -230,7 +232,12 @@ export async function batchBeautify(
   if (files.length === 0)
     return { ok: 0, failed: 0, cancelled: true, usedPlainStyle: false };
 
-  const outDir = await open({ directory: true, multiple: false });
+  // Step 2 of 2 — choose where the beautified copies are saved.
+  const outDir = await open({
+    title: "Batch beautify — Step 2 of 2: choose output folder",
+    directory: true,
+    multiple: false,
+  });
   if (typeof outDir !== "string")
     return { ok: 0, failed: 0, cancelled: true, usedPlainStyle: false };
 
