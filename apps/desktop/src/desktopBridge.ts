@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { save } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { writeImage } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { editor, encodeHandoff, HANDOFF_PARAM } from "@screenxshot/editor";
@@ -200,6 +200,8 @@ export interface BatchResult {
   ok: number;
   failed: number;
   cancelled: boolean;
+  /** True when no `default_style` was set, so the plain look was applied. */
+  usedPlainStyle: boolean;
 }
 
 /** Strip a path down to its filename stem (no directory, no extension). */
@@ -225,13 +227,16 @@ export async function batchBeautify(
     filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }],
   });
   const files = Array.isArray(picked) ? picked : picked ? [picked] : [];
-  if (files.length === 0) return { ok: 0, failed: 0, cancelled: true };
+  if (files.length === 0)
+    return { ok: 0, failed: 0, cancelled: true, usedPlainStyle: false };
 
   const outDir = await open({ directory: true, multiple: false });
-  if (typeof outDir !== "string") return { ok: 0, failed: 0, cancelled: true };
+  if (typeof outDir !== "string")
+    return { ok: 0, failed: 0, cancelled: true, usedPlainStyle: false };
 
   const settings = await invoke<Settings>("get_settings").catch(() => null);
   const style = settings?.default_style ?? null;
+  const usedPlainStyle = style == null;
 
   let ok = 0;
   let failed = 0;
@@ -258,7 +263,7 @@ export async function batchBeautify(
     onProgress?.({ done: i + 1, total: files.length, ok, failed });
   }
 
-  return { ok, failed, cancelled: false };
+  return { ok, failed, cancelled: false, usedPlainStyle };
 }
 
 /** Persist the current editor look as the default style for auto-copy mode. */

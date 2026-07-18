@@ -1,34 +1,46 @@
-/* Live editable pin window: a compact always-on-top mini-editor. Reuses the
-   desktop shell's dark tokens (.ds-shell) + the shared editor, with a slim
-   draggable bar and Copy/Dismiss actions. */
+/* Live editable pin window: a compact always-on-top mini-editor styled as a
+   polished floating card. Reuses the desktop shell's dark tokens (.ds-shell) +
+   the shared editor, with a slim draggable title strip and Copy/Save/Close
+   actions. Chrome stays tasteful; the stage stays fully interactive. */
 
-.pin-shell {
-  height: 100vh;
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid var(--line);
+html,
+body {
+  background: transparent;
 }
 
-/* Slim draggable bar with the pin actions. */
+/* Floating card: hairline border, rounded corners, soft ambient shadow. The
+   inset ring keeps the edge crisp against any wallpaper the pin floats over. */
+.pin-shell {
+  height: 100vh;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  box-shadow:
+    0 24px 60px -22px rgba(0, 0, 0, 0.75),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* Slim draggable title strip with the pin actions. */
 .pin-bar {
-  height: 34px;
-  flex: 0 0 34px;
+  height: 36px;
+  flex: 0 0 36px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   padding: 0 8px 0 12px;
-  background: var(--card);
+  background: linear-gradient(180deg, var(--paper-2), var(--card));
   border-bottom: 1px solid var(--line);
   user-select: none;
 }
 .pin-bar__grip {
-  width: 22px;
+  width: 20px;
   height: 4px;
   border-radius: 2px;
   background: var(--line-2);
 }
 .pin-bar__title {
   font: 600 12px/1 "Inter", system-ui, sans-serif;
+  letter-spacing: -0.01em;
   color: var(--ink-2);
 }
 .pin-bar__actions {
@@ -37,24 +49,35 @@
   align-items: center;
   gap: 6px;
 }
+/* Hairline separating the primary actions from the close button. */
+.pin-bar__sep {
+  width: 1px;
+  height: 16px;
+  background: var(--line-2);
+}
 
 .pin-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  min-height: 24px;
-  padding: 4px 10px;
+  min-height: 25px;
+  padding: 4px 11px;
   font: 600 12px/1 "Inter", system-ui, sans-serif;
+  letter-spacing: -0.01em;
   color: var(--ink);
   background: var(--paper-2);
   border: 1px solid var(--line-2);
-  border-radius: 7px;
+  border-radius: 8px;
   cursor: pointer;
-  transition: background 0.13s, border-color 0.13s, color 0.13s;
+  transition: background 0.13s, border-color 0.13s, color 0.13s, transform 0.1s;
 }
 .pin-btn:hover {
+  background: var(--accent-soft);
   border-color: var(--accent);
+}
+.pin-btn:active {
+  transform: scale(0.97);
 }
 .pin-btn.is-ok {
   color: #6fd99a;
@@ -62,7 +85,7 @@
   background: rgba(111, 217, 154, 0.12);
 }
 .pin-btn--close {
-  padding: 4px 6px;
+  padding: 4px 7px;
   color: var(--ink-2);
 }
 .pin-btn--close svg {
@@ -85,5 +108,5 @@
   display: none;
 }
 .pin-shell .stage {
-  padding: 12px;
+  padding: 14px;
 }

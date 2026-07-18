@@ -8,6 +8,7 @@ import "@screenxshot/editor/styles.css";
 import "../desktop.css";
 import "./pin.css";
 import { bytesToObjectUrl } from "../bytesToObjectUrl";
+import { saveCurrentToFolder } from "../desktopBridge";
 
 // Live editable pin: a small always-on-top window hosting the shared editor on
 // the latest capture. Bytes are served the same way the toast preview / main
@@ -26,6 +27,7 @@ async function loadPinnedCapture(): Promise<void> {
 function PinApp() {
   const hasImage = useStore(editorStore, (s) => s.hasImage);
   const [copied, setCopied] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     // Load immediately on first mount (the window may already be shown), and
@@ -49,6 +51,16 @@ function PinApp() {
     window.setTimeout(() => setCopied(false), 1400);
   }
 
+  async function onSave() {
+    try {
+      await saveCurrentToFolder();
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 1400);
+    } catch (err) {
+      console.error("pin save failed", err);
+    }
+  }
+
   return (
     <div className="ds-shell pin-shell">
       <div className="pin-bar" data-tauri-drag-region>
@@ -66,17 +78,28 @@ function PinApp() {
               {copied ? "Copied" : "Copy"}
             </button>
           )}
+          {hasImage && (
+            <button
+              type="button"
+              className={"pin-btn" + (saved ? " is-ok" : "")}
+              onClick={() => void onSave()}
+            >
+              {saved ? "Saved" : "Save"}
+            </button>
+          )}
+          <span className="pin-bar__sep" aria-hidden />
           <button
             type="button"
             className="pin-btn pin-btn--close"
             aria-label="Dismiss pin"
+            title="Close pin"
             onClick={() => void invoke("pin_dismiss")}
           >
             <svg viewBox="0 0 12 12" aria-hidden>
               <path
                 d="M3 3l6 6M9 3l-6 6"
                 stroke="currentColor"
-                strokeWidth="1.3"
+                strokeWidth="1.4"
                 strokeLinecap="round"
               />
             </svg>

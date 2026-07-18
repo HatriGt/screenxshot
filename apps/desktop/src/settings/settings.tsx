@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Component, useEffect, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -11,17 +11,24 @@ import type {
   ToastPosition,
 } from "./types";
 import capability from "../../src-tauri/capabilities/default.json";
+import {
+  networkPermissions,
+  permissionIdentifiers,
+  type PermissionEntry,
+} from "./capabilities";
 import "./settings.css";
 
 // Read the ACTUAL granted capabilities so the Privacy panel reflects the
-// bundle, not a hardcoded promise. A permission is "network" if its identifier
-// mentions http/network — the app declares none, which is what makes the
-// "screenshots never leave the device" claim auditable rather than marketing.
-const GRANTED_PERMISSIONS: string[] = capability.permissions;
-const NETWORK_PERMISSIONS = GRANTED_PERMISSIONS.filter((p) =>
-  /(^|:)(http|network)/i.test(p),
+// bundle, not a hardcoded promise. Entries are a mix of bare strings and scoped
+// objects (e.g. opener:allow-open-url), so normalize to string identifiers
+// before rendering — a raw object as a React child would crash the window. A
+// permission is "network" if its identifier mentions http/network; the app
+// declares none, which makes the "screenshots never leave the device" claim
+// auditable rather than marketing.
+const GRANTED_PERMISSIONS = permissionIdentifiers(
+  capability.permissions as PermissionEntry[],
 );
-const DECLARES_NETWORK = NETWORK_PERMISSIONS.length > 0;
+const DECLARES_NETWORK = networkPermissions(GRANTED_PERMISSIONS).length > 0;
 
 interface ToggleProps {
   checked: boolean;
@@ -377,4 +384,43 @@ function SettingsApp() {
   );
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(<SettingsApp />);
+// Defensive boundary: a single bad field must never blank the whole window.
+// If any part of the settings tree throws while rendering, fall back to a
+// legible message instead of an empty (black) webview.
+class SettingsBoundary extends Component<
+  { children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: unknown): void {
+    console.error("settings render failed", error);
+  }
+
+  render(): ReactNode {
+    if (this.state.failed) {
+      return (
+        <div className="win">
+          <main className="win__body">
+            <p className="grp__label">Settings unavailable</p>
+            <div className="item item--note">
+              Something went wrong rendering settings. Reopen the window to try
+              again.
+            </div>
+          </main>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+createRoot(document.getElementById("root") as HTMLElement).render(
+  <SettingsBoundary>
+    <SettingsApp />
+  </SettingsBoundary>,
+);

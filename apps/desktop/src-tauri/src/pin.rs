@@ -36,13 +36,16 @@ fn build_pin_window(app: &AppHandle) -> Result<tauri::WebviewWindow, AppError> {
     let mut builder = WebviewWindowBuilder::new(app, PIN_LABEL, WebviewUrl::App("pin.html".into()))
         .title("Pinned capture")
         .inner_size(PIN_W, PIN_H)
-        .min_inner_size(260.0, 220.0)
+        .min_inner_size(280.0, 240.0)
+        .max_inner_size(1100.0, 900.0)
         .decorations(false)
+        .transparent(true)
         .always_on_top(true)
         .skip_taskbar(true)
         .resizable(true)
-        .shadow(true)
-        .background_color(tauri::window::Color(16, 18, 26, 255));
+        // Native OS shadow would double up with the CSS floating-card shadow and
+        // fight the rounded, transparent corners — the card paints its own.
+        .shadow(false);
 
     #[cfg(target_os = "macos")]
     {

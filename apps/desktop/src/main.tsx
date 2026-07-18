@@ -39,9 +39,12 @@ function App() {
       } else {
         setBatchStatus(
           `Done — ${result.ok} saved` +
-            (result.failed > 0 ? `, ${result.failed} failed` : ""),
+            (result.failed > 0 ? `, ${result.failed} failed` : "") +
+            (result.usedPlainStyle
+              ? " · Set a default style in Settings for a custom look"
+              : ""),
         );
-        window.setTimeout(() => setBatchStatus(null), 4000);
+        window.setTimeout(() => setBatchStatus(null), result.usedPlainStyle ? 6000 : 4000);
       }
     } catch (err) {
       console.error("batch beautify failed", err);
