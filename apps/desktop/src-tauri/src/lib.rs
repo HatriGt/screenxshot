@@ -4,7 +4,9 @@ mod error;
 mod history;
 mod overlay;
 mod pin;
+mod scroll;
 mod settings;
+mod stitch;
 mod toast;
 
 pub use error::AppError;
@@ -75,6 +77,7 @@ fn show_main_window(app: &AppHandle) -> Result<(), AppError> {
 pub fn run() {
     let mut builder = tauri::Builder::default()
         .manage(commands::CaptureBuffer::default())
+        .manage(scroll::ScrollSession::default())
         .manage(TrayHandle::default())
         .plugin(build_global_shortcut())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -107,6 +110,8 @@ pub fn run() {
             toast::precreate_toast(app.handle());
             // Warm up the pin window (hidden) so the first pin is instant.
             pin::precreate_pin(app.handle());
+            // Warm up the long-screenshot control window (hidden).
+            scroll::precreate_control(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -137,6 +142,12 @@ pub fn run() {
             commands::finish_capture,
             commands::capture_fullscreen,
             commands::capture_window,
+            commands::list_windows,
+            commands::capture_window_by_id,
+            commands::scroll_start,
+            commands::scroll_capture_frame,
+            commands::scroll_finish,
+            commands::scroll_cancel,
             commands::take_capture,
             commands::save_png,
             commands::save_capture_as,

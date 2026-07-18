@@ -36,6 +36,39 @@ body {
   pointer-events: none;
 }
 
+/* Window-picker highlight — an outlined box over the window under the cursor
+   while in window-capture mode. Non-interactive so pointer events reach the
+   overlay for hit-testing; clipped to the monitor via body overflow:hidden. */
+#winhi {
+  position: fixed;
+  border: 2px solid #5e81f4;
+  background: rgba(94, 129, 244, 0.14);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  border-radius: 3px;
+}
+#winhi-label {
+  position: absolute;
+  left: 0;
+  top: -30px;
+  max-width: 60vw;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: 600 12.5px/1 -apple-system, "Manrope", sans-serif;
+  color: #fff;
+  background: rgba(94, 129, 244, 0.95);
+  padding: 6px 10px;
+  border-radius: 7px;
+}
+
+/* When in window-picker mode the cursor should read as a pointer, not the
+   region crosshair. */
+body.picking,
+body.picking #dim {
+  cursor: pointer;
+}
+
 /* Self-timer countdown — a big centered number shown before the grab. It is
    overlay chrome and must be cleared before capture (handled in overlay.ts). */
 #countdown {

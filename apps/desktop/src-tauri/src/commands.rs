@@ -77,6 +77,105 @@ pub async fn finish_capture(
     dispatch_capture(&app, &buffer, img)
 }
 
+/// Begin a scrolling / long-screenshot session on the region the user drew in
+/// the overlay (Long-screenshot mode). Records the region in managed state,
+/// grabs the first frame, and reveals the floating "Capture next / Done"
+/// control. New command — additive to the existing region/fullscreen/window
+/// capture paths.
+#[tauri::command]
+pub async fn scroll_start(
+    app: AppHandle,
+    rect: CaptureRect,
+    monitor_index: Option<usize>,
+    session: State<'_, crate::scroll::ScrollSession>,
+) -> Result<(), AppError> {
+    // Hide our chrome (overlay/toast) before the first grab, like the region
+    // path, so the dim overlay doesn't tint the frame.
+    hide_capture_chrome(&app)?;
+    let img = tauri::async_runtime::spawn_blocking(move || {
+        wait_for_compositor(CompositorSettle::Region);
+        capture_region_image_by_index(rect, monitor_index)
+    })
+    .await
+    .map_err(|e| AppError::Capture(format!("capture task failed: {e}")))??;
+
+    *session.0.lock().unwrap() = Some(crate::scroll::ScrollState {
+        rect,
+        monitor_index,
+        frames: vec![img],
+    });
+    crate::scroll::show_control(&app, 1)
+}
+
+/// Grab one more frame of the session's region and append it. The user scrolls
+/// the underlying content between calls; overlap is de-duplicated at finish.
+#[tauri::command]
+pub async fn scroll_capture_frame(
+    app: AppHandle,
+    session: State<'_, crate::scroll::ScrollSession>,
+) -> Result<(), AppError> {
+    // Read the region + monitor while NOT holding the lock across the await.
+    let (rect, monitor_index) = {
+        let guard = session.0.lock().unwrap();
+        let state = guard
+            .as_ref()
+            .ok_or_else(|| AppError::Capture("no scroll session".into()))?;
+        (state.rect, state.monitor_index)
+    };
+
+    // Hide the control (and other chrome) so it isn't baked into the frame.
+    crate::scroll::hide_control(&app)?;
+    let img = tauri::async_runtime::spawn_blocking(move || {
+        wait_for_compositor(CompositorSettle::Region);
+        capture_region_image_by_index(rect, monitor_index)
+    })
+    .await
+    .map_err(|e| AppError::Capture(format!("capture task failed: {e}")))??;
+
+    let frames = {
+        let mut guard = session.0.lock().unwrap();
+        let state = guard
+            .as_mut()
+            .ok_or_else(|| AppError::Capture("no scroll session".into()))?;
+        state.frames.push(img);
+        state.frames.len()
+    };
+    // Re-show the control with the updated count.
+    crate::scroll::show_control(&app, frames)
+}
+
+/// Finish the session: stitch every frame into one tall image (de-duplicating
+/// overlap) and deliver it through the normal after-capture dispatch. Clears
+/// the session and hides the control.
+#[tauri::command]
+pub fn scroll_finish(
+    app: AppHandle,
+    session: State<'_, crate::scroll::ScrollSession>,
+    buffer: State<'_, CaptureBuffer>,
+) -> Result<(), AppError> {
+    let frames = session
+        .0
+        .lock()
+        .unwrap()
+        .take()
+        .map(|s| s.frames)
+        .ok_or_else(|| AppError::Capture("no scroll session".into()))?;
+    crate::scroll::hide_control(&app)?;
+    let stitched = crate::stitch::stitch_all(&frames)
+        .ok_or_else(|| AppError::Capture("no frames captured".into()))?;
+    dispatch_capture(&app, &buffer, stitched)
+}
+
+/// Cancel the session without stitching: drop frames and hide the control.
+#[tauri::command]
+pub fn scroll_cancel(
+    app: AppHandle,
+    session: State<'_, crate::scroll::ScrollSession>,
+) -> Result<(), AppError> {
+    *session.0.lock().unwrap() = None;
+    crate::scroll::hide_control(&app)
+}
+
 /// Route freshly-captured PNG bytes through the configured after-capture mode.
 ///
 /// `OpenEditor` shows the main window and signals the editor to load the buffer.
@@ -211,6 +310,122 @@ pub async fn capture_window(
     .await
     .map_err(|e| AppError::Capture(format!("capture task failed: {e}")))??;
     dispatch_capture(&app, &buffer, img)
+}
+
+/// One on-screen window enumerated for the window-capture picker.
+///
+/// Bounds are in GLOBAL physical pixels (xcap's coordinate space): `x`/`y` are
+/// the window's top-left in the virtual-desktop origin, matching monitor
+/// positions from `xcap::Monitor`. The frontend translates these into each
+/// per-monitor overlay's local CSS coords for hit-testing + highlighting.
+///
+/// `z` is xcap's z-order (higher = more toward the front); the picker sorts by
+/// it so overlap resolves front-wins.
+#[derive(Clone, serde::Serialize)]
+pub struct WindowInfo {
+    pub id: u32,
+    pub title: String,
+    pub app_name: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub z: i32,
+}
+
+/// Whether an enumerated window belongs to our own app, so the picker never
+/// offers our overlay/toast/pin/main/settings chrome (or the scroll control, if
+/// a sibling feature adds one) as a capture target.
+///
+/// Robustness: primarily matches by PID (our own process owns all our windows),
+/// which is locale-independent and title-independent — the old title-string
+/// heuristic (P13) mis-picked untitled/localized windows. App-name/title
+/// matching is kept only as a defensive fallback for platforms/edge cases where
+/// xcap can't resolve a reliable pid.
+fn is_own_window(w: &xcap::Window) -> bool {
+    let own_pid = std::process::id();
+    if w.pid().map(|pid| pid == own_pid).unwrap_or(false) {
+        return true;
+    }
+    let app_name = w.app_name().unwrap_or_default();
+    let title = w.title().unwrap_or_default();
+    app_name.to_ascii_lowercase().contains("screenxshot")
+        || title.eq_ignore_ascii_case("Select region")
+        || title.eq_ignore_ascii_case("Screenshot captured")
+}
+
+/// Enumerate capturable on-screen windows for the picker (topmost first).
+///
+/// Skips our own windows, minimized windows, and zero-size/off-screen windows.
+/// Sorted by z-order descending so the frontend's hit-test resolves overlap as
+/// front-wins by taking the first match.
+#[tauri::command]
+pub fn list_windows() -> Result<Vec<WindowInfo>, AppError> {
+    let windows =
+        xcap::Window::all().map_err(|e| AppError::Capture(format!("enumerate windows: {e}")))?;
+    let mut out: Vec<WindowInfo> = windows
+        .into_iter()
+        .filter_map(|w| {
+            if is_own_window(&w) || w.is_minimized().unwrap_or(false) {
+                return None;
+            }
+            let width = w.width().unwrap_or(0);
+            let height = w.height().unwrap_or(0);
+            // Skip zero-size / undetectable-geometry windows (menus, dummies).
+            if width == 0 || height == 0 {
+                return None;
+            }
+            Some(WindowInfo {
+                id: w.id().ok()?,
+                title: w.title().unwrap_or_default(),
+                app_name: w.app_name().unwrap_or_default(),
+                x: w.x().unwrap_or(0),
+                y: w.y().unwrap_or(0),
+                width,
+                height,
+                z: w.z().unwrap_or(0),
+            })
+        })
+        .collect();
+    // Topmost first: hit-testing takes the first rect that contains the cursor.
+    out.sort_by(|a, b| b.z.cmp(&a.z));
+    Ok(out)
+}
+
+/// Capture a specific window (chosen in the picker) by its xcap id and route it
+/// through the after-capture dispatch — same path as every other capture.
+///
+/// The window may have moved/closed between enumerate and grab; if the id no
+/// longer resolves, this errors gracefully so the caller can re-enumerate or
+/// flash a cancel (rather than grabbing the wrong window).
+#[tauri::command]
+pub async fn capture_window_by_id(
+    app: AppHandle,
+    id: u32,
+    buffer: State<'_, CaptureBuffer>,
+) -> Result<(), AppError> {
+    hide_capture_chrome(&app)?;
+    let img = tauri::async_runtime::spawn_blocking(move || {
+        wait_for_compositor(CompositorSettle::FullScreen);
+        capture_window_image_by_id(id)
+    })
+    .await
+    .map_err(|e| AppError::Capture(format!("capture task failed: {e}")))??;
+    dispatch_capture(&app, &buffer, img)
+}
+
+/// Blocking capture of the window whose xcap id matches `id`. Errors if the
+/// window is gone (closed/moved out of enumeration) between pick and grab.
+fn capture_window_image_by_id(id: u32) -> Result<RgbaImage, AppError> {
+    let windows =
+        xcap::Window::all().map_err(|e| AppError::Capture(format!("enumerate windows: {e}")))?;
+    let target = windows
+        .into_iter()
+        .find(|w| w.id().map(|wid| wid == id).unwrap_or(false))
+        .ok_or_else(|| AppError::Capture("window no longer available".into()))?;
+    target
+        .capture_image()
+        .map_err(|e| AppError::Capture(format!("capture window: {e}")))
 }
 
 /// Hide the overlay(s), the editor, and the toast before a full-screen/window
@@ -589,12 +804,7 @@ fn capture_front_window_image() -> Result<RgbaImage, AppError> {
         .find(|w| {
             let minimized = w.is_minimized().unwrap_or(false);
             let title = w.title().unwrap_or_default();
-            let app_name = w.app_name().unwrap_or_default();
-            let ours = app_name.contains("screenxshot")
-                || app_name.contains("ScreenXShot")
-                || title.eq_ignore_ascii_case("Select region")
-                || title.eq_ignore_ascii_case("Screenshot captured");
-            !minimized && !ours && !title.is_empty()
+            !minimized && !is_own_window(w) && !title.is_empty()
         })
         .ok_or_else(|| AppError::Capture("no capturable window found".into()))?;
     target

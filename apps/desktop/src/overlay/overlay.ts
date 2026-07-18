@@ -8,6 +8,12 @@ import {
   type SelectionRect,
 } from "./rect";
 import { countdownSequence } from "./countdown";
+import {
+  windowAtPoint,
+  toLocalRect,
+  type WindowInfo,
+  type GlobalPoint,
+} from "./windowPick";
 import type { Settings } from "../settings/types";
 
 const dim = document.getElementById("dim") as HTMLElement;
@@ -15,9 +21,15 @@ const selEl = document.getElementById("selection") as HTMLElement;
 const bar = document.getElementById("bar") as HTMLElement;
 const hint = document.getElementById("hint") as HTMLElement;
 const countdownEl = document.getElementById("countdown") as HTMLElement;
+const winhiEl = document.getElementById("winhi") as HTMLElement;
+const winhiLabelEl = document.getElementById("winhi-label") as HTMLElement;
 
 let start: { x: number; y: number } | null = null;
 let finished = false;
+// Long-screenshot mode: the next region drag starts a scrolling capture session
+// (scroll_start) instead of a one-shot grab (finish_capture). Toggled by the
+// overlay's "Long screenshot" toolbar button.
+let longMode = false;
 const scaleFactor = window.devicePixelRatio || 1;
 const win = getCurrentWebviewWindow();
 const monitorIndex = monitorIndexFromLabel(win.label);
@@ -54,6 +66,9 @@ async function cancel() {
 // capture and every later capture ignores all input.
 function arm() {
   finished = false;
+  longMode = false;
+  document.getElementById("scroll")?.classList.remove("is-active");
+  exitPicking();
   resetSelection();
 }
 
@@ -69,18 +84,30 @@ void win.onFocusChanged(({ payload: focused }) => {
 void win.listen("overlay:arm", () => arm());
 
 window.addEventListener("pointerdown", (e) => {
-  if (finished) return;
+  if (finished || picking) return;
   // Clicks on the toolbar must not begin an area selection.
   if (bar.contains(e.target as Node)) return;
   start = { x: e.clientX, y: e.clientY };
 });
 
 window.addEventListener("pointermove", (e) => {
+  if (picking) {
+    onPickMove(e);
+    return;
+  }
   if (!start) return;
   drawSelection(normalizeRect(start, { x: e.clientX, y: e.clientY }));
 });
 
+window.addEventListener("click", (e) => {
+  if (!picking) return;
+  // Clicks on the toolbar (e.g. Cancel) keep their own handlers.
+  if (bar.contains(e.target as Node)) return;
+  void onPickClick();
+});
+
 window.addEventListener("pointerup", async (e) => {
+  if (picking) return;
   if (!start || finished) return;
   const cssRect = normalizeRect(start, { x: e.clientX, y: e.clientY });
   resetSelection();
@@ -90,8 +117,17 @@ window.addEventListener("pointerup", async (e) => {
   }
   finished = true;
   await runSelfTimer();
+  const physRect = toPhysicalRect(cssRect, scaleFactor);
+  // Long-screenshot mode routes the same region to a scrolling-capture session
+  // (control window + manual multi-shot stitch) instead of a one-shot grab.
+  if (longMode) {
+    await invoke("scroll_start", { rect: physRect, monitorIndex }).catch((err) =>
+      console.error("scroll start failed", err),
+    );
+    return;
+  }
   await invoke("finish_capture", {
-    rect: toPhysicalRect(cssRect, scaleFactor),
+    rect: physRect,
     monitorIndex,
   }).catch((err) => console.error("finish capture failed", err));
 });
@@ -155,12 +191,100 @@ async function captureScreen() {
   );
 }
 
-async function captureWindow() {
+// ----- Window-picker mode -------------------------------------------------
+// Entering "Window" mode no longer instantly grabs the frontmost window (the
+// old title-string heuristic — see capture_window / P13). Instead the user
+// hovers windows (highlighted live) and clicks the one to capture. Hit-testing
+// is pure + unit-tested in windowPick.ts.
+
+let picking = false;
+let pickWindows: WindowInfo[] = [];
+let hovered: WindowInfo | null = null;
+// This overlay covers exactly one monitor; cache its global physical origin +
+// scale so local cursor coords can be mapped into xcap's global-physical space.
+let monitorOrigin: GlobalPoint = { x: 0, y: 0 };
+let monitorScale = scaleFactor;
+
+/** Map a local (CSS-pixel) overlay point to global physical pixels (xcap space). */
+function toGlobalPhysical(clientX: number, clientY: number): GlobalPoint {
+  return {
+    x: monitorOrigin.x + clientX * monitorScale,
+    y: monitorOrigin.y + clientY * monitorScale,
+  };
+}
+
+function hideHighlight() {
+  winhiEl.hidden = true;
+  hovered = null;
+}
+
+function drawHighlight(w: WindowInfo) {
+  const r = toLocalRect(w, monitorOrigin, monitorScale);
+  winhiEl.hidden = false;
+  winhiEl.style.left = `${r.x}px`;
+  winhiEl.style.top = `${r.y}px`;
+  winhiEl.style.width = `${r.width}px`;
+  winhiEl.style.height = `${r.height}px`;
+  winhiLabelEl.textContent = w.title || w.app_name || "Window";
+}
+
+/** Leave window-picker mode and restore the region-select chrome. */
+function exitPicking() {
+  picking = false;
+  document.body.classList.remove("picking");
+  hideHighlight();
+  bar.hidden = false;
+  hint.hidden = false;
+}
+
+/** Enter window-picker mode: enumerate windows + cache this monitor's geometry. */
+async function enterPicking() {
   if (finished) return;
+  const [windows, monitor] = await Promise.all([
+    invoke<WindowInfo[]>("list_windows").catch((err) => {
+      console.error("list windows failed", err);
+      return [] as WindowInfo[];
+    }),
+    win.currentMonitor().catch(() => null),
+  ]);
+  if (monitor) {
+    monitorOrigin = { x: monitor.position.x, y: monitor.position.y };
+    monitorScale = monitor.scaleFactor;
+  }
+  pickWindows = windows;
+  picking = true;
+  document.body.classList.add("picking");
+  // Keep the toolbar (so the user can cancel); drop the drag hint.
+  hint.hidden = true;
+}
+
+function onPickMove(e: PointerEvent) {
+  if (!picking) return;
+  const hit = windowAtPoint(pickWindows, toGlobalPhysical(e.clientX, e.clientY));
+  if (hit) {
+    hovered = hit;
+    drawHighlight(hit);
+  } else {
+    hideHighlight();
+  }
+}
+
+async function onPickClick() {
+  if (!picking || finished || !hovered) return;
   finished = true;
+  const id = hovered.id;
+  exitPicking();
   await runSelfTimer();
   blankOverlay();
-  await invoke("capture_window").catch((err) => console.error("capture window failed", err));
+  await invoke("capture_window_by_id", { id }).catch((err) =>
+    console.error("capture window by id failed", err),
+  );
+}
+
+/** Toolbar "Window" button: enter the picker (was: instant frontmost grab). */
+function captureWindow() {
+  if (finished || picking) return;
+  void enterPicking();
 }
 
 document.getElementById("screen")?.addEventListener("click", (e) => {
@@ -173,8 +297,21 @@ document.getElementById("window")?.addEventListener("click", (e) => {
 });
 document.getElementById("area")?.addEventListener("click", (e) => {
   e.stopPropagation();
+  // Leaving window-picker mode back to the default drag-to-select.
+  if (picking) exitPicking();
   // Already the default mode; nudge the user to drag.
   hint.classList.remove("hidden");
+  hint.hidden = false;
+});
+document.getElementById("scroll")?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  // Arm Long-screenshot mode: the next area drag starts a scrolling session.
+  longMode = !longMode;
+  (e.currentTarget as HTMLElement).classList.toggle("is-active", longMode);
+  hint.textContent = longMode
+    ? "Drag to select the scrolling area · Esc to cancel"
+    : "Drag to select an area · Esc to cancel";
+  hint.hidden = false;
 });
 document.getElementById("cancel")?.addEventListener("click", (e) => {
   e.stopPropagation();

@@ -1,0 +1,92 @@
+/* Floating "Capture next / Done" control for the long-screenshot session.
+ * Own borderless, transparent, always-on-top window (mirrors the toast). */
+
+:root {
+  color-scheme: dark;
+  --color-paper: oklch(20% 0.02 265);
+  --color-line: oklch(100% 0 0 / 0.12);
+  --color-ink: oklch(97% 0.005 265);
+  --color-ink-2: oklch(72% 0.015 265);
+  --color-accent: oklch(68% 0.15 262);
+  --font-ui: "Inter", system-ui, -apple-system, "SF Pro Text", sans-serif;
+  --radius-lg: 15px;
+  --radius-md: 9px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  font-family: var(--font-ui);
+}
+
+.scroll {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 100%;
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  box-shadow: 0 12px 40px oklch(0% 0 0 / 0.45);
+  color: var(--color-ink);
+}
+
+.scroll__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.scroll__title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.scroll__count {
+  font-size: 11px;
+  color: var(--color-ink-2);
+}
+
+.scroll__actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.scroll__btn {
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-ink);
+  background: oklch(100% 0 0 / 0.06);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.scroll__btn:hover {
+  background: oklch(100% 0 0 / 0.12);
+}
+
+.scroll__btn--primary {
+  background: var(--color-accent);
+  border-color: transparent;
+  color: oklch(15% 0.02 265);
+}
+
+.scroll__btn--ghost {
+  background: transparent;
+  color: var(--color-ink-2);
+}
+
+.scroll__btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}

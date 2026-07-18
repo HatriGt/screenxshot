@@ -22,6 +22,7 @@ export default defineConfig({
         settings: resolve(__dirname, "settings.html"),
         toast: resolve(__dirname, "toast.html"),
         pin: resolve(__dirname, "pin.html"),
+        scroll: resolve(__dirname, "scroll.html"),
       },
     },
   },
