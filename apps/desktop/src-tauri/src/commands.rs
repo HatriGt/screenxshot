@@ -24,8 +24,18 @@ pub fn show_overlay(app: AppHandle) -> Result<(), AppError> {
 /// (created hidden to avoid a cold-start black flash while the JS bundle loads)
 /// can now be revealed. Idempotent: a no-op if the window is already visible or
 /// was already shown by a capture path / the setup fallback timeout.
+///
+/// Also marks the startup reveal as done (`MainRevealed`), which disarms the
+/// setup fallback timer so it can never later surface the main window over a
+/// capture overlay. In normal launches this fires within a couple frames, long
+/// before the 4s fallback.
 #[tauri::command]
 pub fn main_ready(app: AppHandle) -> Result<(), AppError> {
+    // Disarm the startup fallback timer: the frontend has painted, so the
+    // one-time reveal is (or is about to be) handled here.
+    if let Some(state) = app.try_state::<crate::MainRevealed>() {
+        state.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
     if let Some(main) = app.get_webview_window("main") {
         if !main.is_visible().unwrap_or(false) {
             main.show().map_err(|e| AppError::Overlay(e.to_string()))?;
@@ -211,6 +221,11 @@ fn dispatch_capture(
                 main.show().map_err(|e| AppError::Overlay(e.to_string()))?;
                 main.set_focus()
                     .map_err(|e| AppError::Overlay(e.to_string()))?;
+            }
+            // A capture surfaced the main window; mark the startup reveal done
+            // so the fallback timer stays disarmed.
+            if let Some(state) = app.try_state::<crate::MainRevealed>() {
+                state.0.store(true, std::sync::atomic::Ordering::SeqCst);
             }
             app.emit("capture:ready", ())
                 .map_err(|e| AppError::Overlay(e.to_string()))?;

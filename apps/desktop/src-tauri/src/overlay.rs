@@ -116,6 +116,15 @@ pub fn precreate_overlays(app: &AppHandle) {
     }
 }
 
+/// Whether any overlay window is currently visible (a capture selection is in
+/// progress). Used by the startup fallback timer so it never reveals the main
+/// window over an active overlay.
+pub fn any_overlay_visible(app: &AppHandle) -> bool {
+    app.webview_windows().iter().any(|(label, win)| {
+        is_overlay_label(label) && win.is_visible().unwrap_or(false)
+    })
+}
+
 /// Hide every overlay window (kept alive for the next capture — no rebuild).
 pub fn hide_overlay(app: &AppHandle) -> Result<(), AppError> {
     for (label, win) in app.webview_windows() {

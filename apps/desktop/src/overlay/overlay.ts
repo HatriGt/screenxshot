@@ -75,9 +75,15 @@ function arm() {
 // Grab focus so the very first click isn't swallowed by the OS.
 void win.setFocus().catch(() => {});
 
-// Rust shows + focuses the overlay on every capture; re-arm on each focus gain.
+// Rust shows + focuses the overlay on every capture; re-arm on focus gain — but
+// ONLY when the overlay is idle. A focus event can arrive mid-interaction (the
+// main window being shown/focused around a capture bounces focus back to the
+// overlay); re-arming then would call resetSelection() and wipe the in-progress
+// drag (`start`), so pointerup would see no selection and never fire the grab.
+// The deterministic `overlay:arm` event below is the reliable re-arm; this
+// focus path only covers the very first click after a fresh reveal.
 void win.onFocusChanged(({ payload: focused }) => {
-  if (focused) arm();
+  if (focused && start === null && !finished && !picking) arm();
 });
 
 // Deterministic re-arm: Rust emits this whenever it reveals a reused overlay.

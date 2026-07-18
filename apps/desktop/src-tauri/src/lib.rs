@@ -11,6 +11,7 @@ mod toast;
 
 pub use error::AppError;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
@@ -22,6 +23,15 @@ use tauri::{
 /// after new captures are saved.
 #[derive(Default)]
 pub struct TrayHandle(pub Mutex<Option<TrayIcon>>);
+
+/// Tracks whether the one-time startup reveal of the main window has already
+/// happened (via `main_ready` after first paint, or the fallback timer). Once
+/// set, the startup fallback timer is a no-op so it can never re-surface the
+/// main window later — e.g. over the capture overlay when the hotkey is pressed
+/// during the grace period. `main_ready` sets this as soon as the frontend
+/// signals it has painted, disarming the timer for normal launches.
+#[derive(Default)]
+pub struct MainRevealed(pub AtomicBool);
 
 /// Bring the main window to the front, centered on the primary monitor.
 ///
@@ -79,6 +89,7 @@ pub fn run() {
         .manage(commands::CaptureBuffer::default())
         .manage(scroll::ScrollSession::default())
         .manage(TrayHandle::default())
+        .manage(MainRevealed::default())
         .plugin(build_global_shortcut())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
@@ -115,18 +126,36 @@ pub fn run() {
             // The main window is created hidden (see tauri.conf.json) so the
             // cold-start black flash — window shown before the heavy editor JS
             // bundle paints — is gone; the frontend calls `main_ready` once it
-            // has mounted + painted. Guard against a missing ready signal (JS
-            // error / early panic) so the app can never get stuck invisible:
-            // show it regardless after a short grace period. `main_ready`'s
-            // visibility check keeps this idempotent with the ready path.
+            // has mounted + painted, which reveals the window AND disarms this
+            // fallback via the `MainRevealed` flag. This timer only exists to
+            // recover from a missing ready signal (JS error / early panic) so
+            // the app can never get stuck invisible: show it once after a grace
+            // period — but ONLY if the startup reveal hasn't already happened
+            // and no overlay/capture session is active, so it can never pop the
+            // main window up over the selection overlay if the hotkey is used
+            // during the grace window. It fires at most once and never re-shows
+            // the window later.
             {
                 let handle = app.handle().clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_millis(4000));
+                    // Already revealed by `main_ready` (the normal case): no-op.
+                    if let Some(state) = handle.try_state::<MainRevealed>() {
+                        if state.0.load(Ordering::SeqCst) {
+                            return;
+                        }
+                    }
+                    // Never surface the main window while a capture overlay is up.
+                    if overlay::any_overlay_visible(&handle) {
+                        return;
+                    }
                     if let Some(main) = handle.get_webview_window("main") {
                         if !main.is_visible().unwrap_or(false) {
                             let _ = main.show();
                         }
+                    }
+                    if let Some(state) = handle.try_state::<MainRevealed>() {
+                        state.0.store(true, Ordering::SeqCst);
                     }
                 });
             }
