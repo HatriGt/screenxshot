@@ -1,0 +1,479 @@
+/* ===========================================================================
+   Desktop shell layout + dark theme.
+
+   The shared @screenxshot/editor is a light "browser-window card" built for a
+   marketing page (fixed height, floating card, fake mac frame). In the desktop
+   app we want the editor to FILL the whole window, be fully dark, expose no
+   page-level scrollbar (only the wallpaper grid scrolls), and float its actions
+   over the stage instead of a top toolbar.
+
+   Everything here is scoped to `.ds-shell` so `packages/editor` (shared with
+   the web app) is never modified.
+   =========================================================================== */
+
+/* No page scroll anywhere — the window is the app. Only inner regions (the
+   wallpaper grid) scroll. */
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* The web app reveals `.window` on scroll; the desktop shell has no scroll, so
+   revealed content must be visible immediately. */
+.reveal {
+  opacity: 1 !important;
+  transform: none !important;
+}
+
+/* ---------------------------------------------------------------------------
+   Dark token palette (overrides the editor's :root light tokens for descendants)
+   --------------------------------------------------------------------------- */
+.ds-shell {
+  --paper: #14161f;
+  --paper-2: #1b1e29;
+  --card: #10121a;
+  --ink: #f3f5fb;
+  --ink-2: #b7bdcc;
+  --faint: #7c8394;
+  --line: #262a37;
+  --line-2: #333846;
+  --accent: #6c8cff;
+  --accent-ink: #a9bbff;
+  --accent-soft: #23273a;
+  --pill: #2a2f3e;
+  --sh-win: none;
+  --sh-md: 0 16px 40px -18px rgba(0, 0, 0, 0.6);
+  --sh-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+
+  /* Premium display/body font for the desktop app (Inter — "Modern Dark
+     Cinema": technical, precise, high-end). Mono stays JetBrains Mono. */
+  --disp: "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-family: var(--disp);
+  letter-spacing: -0.011em;
+
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------------------------
+   Custom frameless titlebar (drag + Settings + window controls only)
+   --------------------------------------------------------------------------- */
+.ds-titlebar {
+  height: 38px;
+  flex: 0 0 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 0 14px;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+}
+.ds-titlebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 600 13px/1 "Manrope", -apple-system, sans-serif;
+  color: #fff;
+}
+.ds-titlebar__logo {
+  width: 17px;
+  height: 17px;
+  border-radius: 5px;
+  display: block;
+}
+.ds-titlebar__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ds-titlebar__sep {
+  width: 1px;
+  height: 18px;
+  background: rgba(255, 255, 255, 0.12);
+  margin: 0 4px;
+}
+.ds-titlebar__btn,
+.ds-titlebar__ctl {
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.72);
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.ds-titlebar__btn {
+  width: 28px;
+  height: 28px;
+}
+.ds-titlebar__btn svg {
+  width: 16px;
+  height: 16px;
+}
+.ds-titlebar__ctl {
+  width: 26px;
+  height: 26px;
+}
+.ds-titlebar__ctl svg {
+  width: 12px;
+  height: 12px;
+}
+.ds-titlebar__btn:hover,
+.ds-titlebar__ctl:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+.ds-titlebar__ctl--close:hover {
+  background: #e0443e;
+  color: #fff;
+}
+
+/* ---------------------------------------------------------------------------
+   Body: the editor fills all remaining height; FABs anchor to it.
+   --------------------------------------------------------------------------- */
+.ds-body {
+  flex: 1 1 auto;
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Make the editor's nested containers fill the window instead of floating as a
+   fixed-height card. */
+.ds-shell .studio-area,
+.ds-shell .studio-area .shell,
+.ds-shell .window {
+  height: 100%;
+}
+.ds-shell .studio-area {
+  position: relative;
+}
+.ds-shell .shell {
+  max-width: none;
+  padding: 0;
+}
+.ds-shell .sideshapes {
+  display: none !important;
+}
+
+/* Kill the fake browser-window card: no top offset, radius, border, or shadow;
+   fill height and lay out as a column so `.studio` can grow. */
+.ds-shell .window {
+  margin-top: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+}
+
+/* The fake winbar is gone entirely — its Copy/Save buttons (#stagebtns) are
+   repositioned over the stage below. */
+.ds-shell .winbar {
+  display: none;
+}
+
+/* The editor grid fills the remaining height (override fixed 660px). */
+.ds-shell .studio {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Stage (image preview) — dark, fills its cell.
+   --------------------------------------------------------------------------- */
+.ds-shell .stage {
+  background: radial-gradient(120% 90% at 50% 0%, #1a1d28, #101219);
+  padding: 24px;
+}
+.ds-shell #canvas {
+  max-height: none;
+}
+
+/* Floating action bar: pull the editor's Copy/Save (#stagebtns) out of the
+   (hidden) winbar and dock it bottom-right over the stage. */
+.ds-shell #stagebtns {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 20;
+  margin: 0;
+}
+
+/* Floating action cluster (added in main.tsx): Set default / Save / Capture.
+   Anchored bottom-left so it never overlaps the editor's own Copy/Save
+   (#stagebtns, bottom-right). */
+.ds-fabs {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
+  z-index: 21;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.ds-fab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font: 600 13px/1 "Inter", system-ui, sans-serif;
+  border-radius: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: transform 0.14s cubic-bezier(0.2, 0.7, 0.2, 1),
+    background 0.14s, border-color 0.14s;
+}
+.ds-fab svg {
+  width: 16px;
+  height: 16px;
+}
+.ds-fab--primary {
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid transparent;
+  box-shadow: 0 10px 26px -12px rgba(108, 140, 255, 0.75);
+}
+.ds-fab--primary:hover {
+  background: #839dff;
+  transform: translateY(-1px);
+}
+.ds-fab--ghost {
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--line-2);
+}
+.ds-fab--ghost:hover {
+  background: var(--card-2, #232734);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+.ds-fab.is-ok {
+  color: #6fd99a;
+  border-color: rgba(111, 217, 154, 0.5);
+  background: rgba(111, 217, 154, 0.12);
+}
+.ds-fab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.ds-fab:disabled {
+  opacity: 0.6;
+  cursor: default;
+  transform: none;
+}
+
+/* Batch-beautify progress/result text next to the Batch action. */
+.ds-batch-status {
+  font: 500 12px/1 "Inter", system-ui, sans-serif;
+  color: var(--ink-2);
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   Capture history / recents panel — floats over the stage, bottom-left.
+   --------------------------------------------------------------------------- */
+.ds-hist {
+  position: absolute;
+  left: 18px;
+  bottom: 70px;
+  z-index: 30;
+  width: 340px;
+  max-height: 62%;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  box-shadow: 0 18px 44px -18px rgba(0, 0, 0, 0.7);
+  overflow: hidden;
+}
+.ds-hist-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.ds-hist-head-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+.ds-hist-title {
+  font: 700 13px/1 "Inter", system-ui, sans-serif;
+  color: var(--ink);
+}
+.ds-hist-empty {
+  padding: 20px 14px;
+  margin: 0;
+  font: 500 12px/1.5 "Inter", system-ui, sans-serif;
+  color: var(--ink-2);
+  text-align: center;
+}
+.ds-hist-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ds-hist-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px;
+  border-radius: 8px;
+}
+.ds-hist-row:hover {
+  background: var(--card-2, #232734);
+}
+.ds-hist-row.is-missing {
+  opacity: 0.5;
+}
+.ds-hist-thumb {
+  width: 56px;
+  height: 40px;
+  flex: none;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  background: var(--card-2, #232734);
+  cursor: pointer;
+  padding: 0;
+}
+.ds-hist-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.ds-hist-thumb__ph {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.ds-hist-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ds-hist-name {
+  font: 600 12px/1.2 "Inter", system-ui, sans-serif;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ds-hist-time {
+  font: 500 11px/1.2 "Inter", system-ui, sans-serif;
+  color: var(--ink-2);
+}
+.ds-hist-actions {
+  display: inline-flex;
+  gap: 4px;
+  flex: none;
+}
+.ds-hist-act {
+  font: 600 11px/1 "Inter", system-ui, sans-serif;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  padding: 6px 8px;
+  cursor: pointer;
+  transition: background 0.14s, border-color 0.14s;
+}
+.ds-hist-act:hover {
+  border-color: var(--accent);
+}
+.ds-hist-act:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ds-hist-act:focus-visible,
+.ds-hist-thumb:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   Right panel + wallpaper grid — dark; only .walls scrolls.
+   --------------------------------------------------------------------------- */
+.ds-shell .panel {
+  background: var(--card);
+  border-left-color: var(--line);
+  min-height: 0;
+}
+.ds-shell #pane-bg {
+  min-height: 0;
+}
+/* .walls already has overflow:auto in the editor; ensure its scrollbar reads
+   on dark. */
+.ds-shell .walls::-webkit-scrollbar-thumb {
+  background: var(--line-2);
+}
+
+/* ---------------------------------------------------------------------------
+   Surfaces that hardcode white in the shared CSS need explicit dark values.
+   --------------------------------------------------------------------------- */
+.ds-shell .dock {
+  background: rgba(24, 27, 38, 0.92);
+}
+.ds-shell .dock .tool.on {
+  background: var(--accent);
+}
+
+/* Tooltip fix: the shared CSS paints tooltips with `background:var(--ink)` +
+   white text. In dark mode --ink is near-white, making the tooltip invisible.
+   Repaint tool/replace tooltips as a dark chip with light text. */
+.ds-shell .dock .tool[data-tip]:hover::after,
+.ds-shell .replace button[data-tip]:hover::after {
+  background: #1f2330;
+  color: #f3f5fb;
+  border: 1px solid var(--line-2);
+  box-shadow: 0 8px 20px -8px rgba(0, 0, 0, 0.7);
+}
+.ds-shell .dsize button.on,
+.ds-shell .tab.on,
+.ds-shell .catseg button.on,
+.ds-shell .seg button.on {
+  background: var(--accent);
+  color: #fff;
+}
+.ds-shell .replace button {
+  background: var(--paper-2);
+  border-color: var(--line-2);
+  color: var(--ink-2);
+}
+.ds-shell .drop {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--line-2);
+}
+.ds-shell .drop:hover,
+.ds-shell .drop.hot {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.ds-shell .drop .keys kbd,
+.ds-shell .pastehint kbd {
+  background: var(--paper-2);
+  border-color: var(--line-2);
+  color: var(--ink);
+}
+.ds-shell .pill-white {
+  background: var(--paper-2);
+  color: var(--ink);
+  border-color: var(--line-2);
+}

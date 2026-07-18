@@ -1,0 +1,35 @@
+[package]
+name = "screenxshot"
+version = "1.0.0"
+description = "ScreenXShot desktop"
+authors = ["ScreenXShot"]
+edition = "2021"
+
+# Required for mobile builds: lib crate holds all app logic; main.rs is a thin
+# passthrough that Tauri replaces with a mobile entry point on mobile targets.
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# image-png: lets the clipboard-manager plugin decode the PNG bytes we hand to
+# writeImage(); without it JsImage::Bytes -> Image::from_bytes errors out.
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+xcap = "0.7"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-store = "2"
+tauri-plugin-opener = "2"
+
+[target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
+tauri-plugin-updater = "2"
+tauri-plugin-autostart = "2"

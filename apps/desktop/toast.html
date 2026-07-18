@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Screenshot captured</title>
+    <link rel="stylesheet" href="/src/toast/toast.css" />
+  </head>
+  <body>
+    <div id="toast" class="toast">
+      <div id="toastbody" class="toast__body" role="button" tabindex="0" aria-label="Open capture in editor">
+        <span class="toast__mark" aria-hidden="true">
+          <img class="toast__logo" src="/logo.svg" alt="" width="30" height="30" />
+          <img id="toastpreview" class="toast__preview" alt="" />
+          <span class="toast__spinner"></span>
+          <span class="toast__badge">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 13l4 4L19 7" /></svg>
+          </span>
+        </span>
+        <span class="toast__text">
+          <span class="toast__title" id="toasttitle">Screenshot captured</span>
+          <span class="toast__hint" id="toasthint">Copied to clipboard</span>
+        </span>
+        <span class="toast__cta" aria-hidden="true">
+          Edit
+          <svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg>
+        </span>
+      </div>
+      <div class="toast__actions" id="toastactions">
+        <button type="button" class="toast__action" data-action="copy">Copy</button>
+        <button type="button" class="toast__action" data-action="copy-styled">Copy styled</button>
+        <button type="button" class="toast__action" data-action="pin">Pin</button>
+        <button type="button" class="toast__action" data-action="edit">Edit</button>
+      </div>
+      <span class="toast__bar" aria-hidden="true"><i id="toastbar"></i></span>
+    </div>
+    <script type="module" src="/src/toast/toast.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,33 @@
+{
+  "name": "@screenxshot/desktop",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "ScreenXShot desktop app (Tauri v2) — editor-only shell + native capture.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@screenxshot/editor": "*",
+    "@tanstack/react-store": "^0.5.5",
+    "@tanstack/store": "^0.5.5",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-autostart": "^2",
+    "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-opener": "^2.5.4",
+    "@tauri-apps/plugin-store": "^2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.4.2",
+    "vitest": "^4.1.10"
+  }
+}

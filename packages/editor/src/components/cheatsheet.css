@@ -1,0 +1,15 @@
+/* Shortcut cheatsheet overlay — dark, lightweight, shared web+desktop. */
+.cheat-scrim{position:fixed;inset:0;z-index:60;display:grid;place-items:center;background:rgba(10,12,22,.44);backdrop-filter:blur(3px)}
+.cheat{width:min(440px,calc(100% - 32px));max-height:calc(100% - 48px);overflow:auto;background:#16181f;color:#eef1f6;
+  border:1px solid rgba(255,255,255,.09);border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,.5);padding:18px 20px}
+.cheat h4{margin:0 0 2px;font-size:15px;font-weight:800;letter-spacing:-.01em}
+.cheat .cheat-sub{margin:0 0 14px;font-size:12px;color:#9aa3b2}
+.cheat-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px}
+.cheat-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:3px 0}
+.cheat-row span{font-size:13px;color:#cdd3de}
+.cheat-row kbd{font-family:var(--mono,ui-monospace,monospace);font-size:11px;min-width:20px;text-align:center;
+  background:#242832;color:#eef1f6;border:1px solid rgba(255,255,255,.1);border-bottom-width:2px;border-radius:6px;padding:2px 6px}
+.cheat-foot{margin-top:14px;font-size:11px;color:#8b93a2;text-align:center}
+.cheat-foot kbd{font-family:var(--mono,ui-monospace,monospace);background:#242832;border:1px solid rgba(255,255,255,.1);border-radius:5px;padding:1px 5px}
+/* Dock "?" affordance reuses .dock .tool styling; this just fixes the glyph. */
+.dock .tool.cheat-btn{font-weight:800;font-size:15px}

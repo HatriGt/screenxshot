@@ -1,0 +1,139 @@
+:root {
+  color-scheme: dark;
+}
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+html,
+body {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  cursor: crosshair;
+  background: transparent;
+  user-select: none;
+}
+
+/* Single, steady dim layer — present from the first frame so there is no
+   flash. While selecting, the selection box's huge box-shadow provides the
+   dim instead, and we hide this base layer to avoid double-dimming. */
+#dim {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 10, 20, 0.35);
+}
+#dim.selecting {
+  background: transparent;
+}
+
+#selection {
+  position: fixed;
+  border: 1.5px solid #fff;
+  background: transparent;
+  box-shadow: 0 0 0 100vmax rgba(8, 10, 20, 0.35);
+  pointer-events: none;
+}
+
+/* Self-timer countdown — a big centered number shown before the grab. It is
+   overlay chrome and must be cleared before capture (handled in overlay.ts). */
+#countdown {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font: 700 clamp(120px, 22vw, 300px) / 1 -apple-system, "Manrope", sans-serif;
+  color: #fff;
+  text-shadow: 0 6px 40px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  user-select: none;
+}
+
+#hint {
+  position: fixed;
+  top: 44px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 48px);
+  white-space: nowrap;
+  font: 500 13px/1 -apple-system, "Manrope", sans-serif;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(8, 10, 20, 0.66);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 9px 15px;
+  border-radius: 999px;
+  pointer-events: none;
+}
+#hint.hidden {
+  opacity: 0;
+}
+
+/* Bottom capture toolbar — centered, safely inset from every screen edge. */
+#bar {
+  position: fixed;
+  left: 50%;
+  bottom: 40px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  background: rgba(22, 24, 32, 0.82);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  cursor: default;
+}
+
+.bar__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 13px;
+  font: 600 12.5px/1 -apple-system, "Manrope", sans-serif;
+  color: rgba(255, 255, 255, 0.72);
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+.bar__btn svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.bar__btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+.bar__btn.is-active {
+  color: #fff;
+  background: rgba(94, 129, 244, 0.9);
+}
+.bar__btn--ghost {
+  color: rgba(255, 255, 255, 0.6);
+}
+.bar__btn--ghost:hover {
+  color: #fff;
+  background: rgba(224, 68, 62, 0.85);
+}
+.bar__sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 3px;
+  background: rgba(255, 255, 255, 0.12);
+}
