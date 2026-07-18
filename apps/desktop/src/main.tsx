@@ -188,5 +188,16 @@ function App() {
 
 createRoot(document.getElementById("root") as HTMLElement).render(<App />);
 
+// The main window is created hidden (tauri.conf.json) to avoid a cold-start
+// black flash while this bundle loads. Reveal it once React has mounted and the
+// browser has committed a first paint — two rAFs ensure we're past the initial
+// layout/paint so the window appears already painted, not blank. A Rust-side
+// fallback timeout shows it anyway if this never fires.
+requestAnimationFrame(() => {
+  requestAnimationFrame(() => {
+    void invoke("main_ready");
+  });
+});
+
 // Wire native capture delivery (hotkey/overlay -> editor).
 void initDesktopBridge();

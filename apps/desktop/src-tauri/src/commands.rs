@@ -20,6 +20,22 @@ pub fn show_overlay(app: AppHandle) -> Result<(), AppError> {
     overlay::show_overlay(&app)
 }
 
+/// The main webview has mounted React + painted its first frame, so the window
+/// (created hidden to avoid a cold-start black flash while the JS bundle loads)
+/// can now be revealed. Idempotent: a no-op if the window is already visible or
+/// was already shown by a capture path / the setup fallback timeout.
+#[tauri::command]
+pub fn main_ready(app: AppHandle) -> Result<(), AppError> {
+    if let Some(main) = app.get_webview_window("main") {
+        if !main.is_visible().unwrap_or(false) {
+            main.show().map_err(|e| AppError::Overlay(e.to_string()))?;
+            main.set_focus()
+                .map_err(|e| AppError::Overlay(e.to_string()))?;
+        }
+    }
+    Ok(())
+}
+
 /// Open (or focus) the Settings window.
 #[tauri::command]
 pub fn open_settings(app: AppHandle) -> Result<(), AppError> {

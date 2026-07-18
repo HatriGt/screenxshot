@@ -18,6 +18,10 @@ body,
 #root {
   height: 100%;
   overflow: hidden;
+  /* Paint the app's dark surface from the very first frame (matches the main
+     window's backgroundColor + the .ds-shell --paper token) so any pre-mount
+     frame is the dark theme, never a black/white flash. */
+  background: #14161f;
 }
 
 /* The web app reveals `.window` on scroll; the desktop shell has no scroll, so

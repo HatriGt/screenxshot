@@ -112,6 +112,24 @@ pub fn run() {
             pin::precreate_pin(app.handle());
             // Warm up the long-screenshot control window (hidden).
             scroll::precreate_control(app.handle());
+            // The main window is created hidden (see tauri.conf.json) so the
+            // cold-start black flash — window shown before the heavy editor JS
+            // bundle paints — is gone; the frontend calls `main_ready` once it
+            // has mounted + painted. Guard against a missing ready signal (JS
+            // error / early panic) so the app can never get stuck invisible:
+            // show it regardless after a short grace period. `main_ready`'s
+            // visibility check keeps this idempotent with the ready path.
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(4000));
+                    if let Some(main) = handle.get_webview_window("main") {
+                        if !main.is_visible().unwrap_or(false) {
+                            let _ = main.show();
+                        }
+                    }
+                });
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -137,6 +155,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::capture_region,
             commands::show_overlay,
+            commands::main_ready,
             commands::open_settings,
             commands::cancel_overlay,
             commands::finish_capture,
