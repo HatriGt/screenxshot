@@ -32,16 +32,33 @@ function formatExtension(format: ExportFormat): string {
 // @screenxshot/editor platform-agnostic: the editor only ever sees a normal
 // image URL via its existing fromSrc().
 
-async function loadLatestCapture(): Promise<void> {
-  const bytes = await invoke<ArrayBuffer>("take_capture");
+/**
+ * Load raw PNG bytes into the shared editor and revoke the temporary blob URL
+ * only AFTER the editor has finished decoding it.
+ *
+ * `editor.fromSrc()` decodes the URL asynchronously via its own detached Image
+ * and swaps the canvas on that image's load. Revoking the blob URL before that
+ * decode completes makes the editor's load fail silently, leaving the PREVIOUS
+ * capture on screen (the capture-staleness bug). So we decode a probe first and
+ * only hand the (now browser-cached) URL to the editor once it's ready, then
+ * revoke on the next frame — after the editor's cache-hit decode is safely done.
+ */
+export function loadBytesIntoEditor(bytes: ArrayBuffer | Uint8Array): void {
   const url = bytesToObjectUrl(bytes);
-  // editor.fromSrc() is fire-and-forget; revoke once the image has loaded by
-  // probing a detached Image with the same src (the blob URL is cached).
-  editor.fromSrc(url);
   const probe = new Image();
-  probe.onload = () => URL.revokeObjectURL(url);
+  const finish = () => {
+    editor.fromSrc(url);
+    // Give the editor's cache-hit decode a frame before releasing the URL.
+    requestAnimationFrame(() => URL.revokeObjectURL(url));
+  };
+  probe.onload = finish;
   probe.onerror = () => URL.revokeObjectURL(url);
   probe.src = url;
+}
+
+async function loadLatestCapture(): Promise<void> {
+  const bytes = await invoke<ArrayBuffer>("take_capture");
+  loadBytesIntoEditor(bytes);
 }
 
 /** Native save-as fallback: prompt for a path and write PNG bytes via Rust. */
@@ -342,12 +359,7 @@ export async function clearHistory(): Promise<void> {
  */
 export async function openHistoryInEditor(path: string): Promise<void> {
   const bytes = await invoke<ArrayBuffer>("read_image_file", { path });
-  const url = bytesToObjectUrl(bytes);
-  editor.fromSrc(url);
-  const probe = new Image();
-  probe.onload = () => URL.revokeObjectURL(url);
-  probe.onerror = () => URL.revokeObjectURL(url);
-  probe.src = url;
+  loadBytesIntoEditor(bytes);
 }
 
 /** Persist the current editor look as the default style for auto-copy mode. */

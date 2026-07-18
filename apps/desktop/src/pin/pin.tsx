@@ -7,8 +7,7 @@ import { useStore } from "@tanstack/react-store";
 import "@screenxshot/editor/styles.css";
 import "../desktop.css";
 import "./pin.css";
-import { bytesToObjectUrl } from "../bytesToObjectUrl";
-import { saveCurrentToFolder } from "../desktopBridge";
+import { loadBytesIntoEditor, saveCurrentToFolder } from "../desktopBridge";
 
 // Live editable pin: a small always-on-top window hosting the shared editor on
 // the latest capture. Bytes are served the same way the toast preview / main
@@ -16,12 +15,7 @@ import { saveCurrentToFolder } from "../desktopBridge";
 // engine only ever sees a normal image URL.
 async function loadPinnedCapture(): Promise<void> {
   const bytes = await invoke<ArrayBuffer>("take_capture");
-  const url = bytesToObjectUrl(bytes);
-  editor.fromSrc(url);
-  const probe = new Image();
-  probe.onload = () => URL.revokeObjectURL(url);
-  probe.onerror = () => URL.revokeObjectURL(url);
-  probe.src = url;
+  loadBytesIntoEditor(bytes);
 }
 
 function PinApp() {
