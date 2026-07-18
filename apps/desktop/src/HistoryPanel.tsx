@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   clearHistory,
@@ -27,9 +27,30 @@ function formatTime(unixSecs: number): string {
 /** A single recents row with a lazily-loaded thumbnail. */
 function HistoryRow({ entry }: { entry: HistoryEntry }) {
   const [thumb, setThumb] = useState<string | null>(null);
+  const rowRef = useRef<HTMLLIElement | null>(null);
+  // Only load the (full-res) bytes once the row is near the viewport, so opening
+  // Recents with many rows doesn't read every image at once and spike memory
+  // (M8). A downscaled-thumbnail Rust command would be the ideal fix.
+  const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    if (entry.missing) return;
+    const el = rowRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (records) => {
+        if (records.some((r) => r.isIntersecting)) {
+          setVisible(true);
+          observer.disconnect(); // load once, then stop observing
+        }
+      },
+      { rootMargin: "200px" }, // pre-load a little before it scrolls in
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (entry.missing || !visible) return;
     let url: string | null = null;
     let cancelled = false;
     void invoke<ArrayBuffer>("read_image_file", { path: entry.path })
@@ -43,7 +64,7 @@ function HistoryRow({ entry }: { entry: HistoryEntry }) {
       cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [entry.path, entry.missing]);
+  }, [entry.path, entry.missing, visible]);
 
   async function onOpen() {
     if (entry.missing) return;
@@ -61,7 +82,10 @@ function HistoryRow({ entry }: { entry: HistoryEntry }) {
   }
 
   return (
-    <li className={"ds-hist-row" + (entry.missing ? " is-missing" : "")}>
+    <li
+      ref={rowRef}
+      className={"ds-hist-row" + (entry.missing ? " is-missing" : "")}
+    >
       <button
         type="button"
         className="ds-hist-thumb"

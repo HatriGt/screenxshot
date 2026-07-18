@@ -1,6 +1,13 @@
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
+use std::sync::Mutex;
 use tauri::AppHandle;
+
+/// Serializes the history read-modify-write (`record_save`) so two rapid
+/// concurrent auto-saves can't both read the same list and clobber each other's
+/// insert, losing an entry (L2). The store itself isn't transactional across a
+/// read+write, so we take this lock around the whole RMW.
+static RECORD_LOCK: Mutex<()> = Mutex::new(());
 
 /// Store key (in the existing `settings.json` store) holding the capture-history
 /// index. A small, capped list of the most recent saved captures so the tray
@@ -80,12 +87,15 @@ pub fn record_save(app: &AppHandle, path: &str, png_bytes: Option<&[u8]>) -> Res
         height,
         missing: false,
     };
+    // Serialize the read-modify-write so concurrent saves don't lose entries.
+    let _guard = RECORD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut entries = read(app);
     // Drop any prior record for the same path so re-saves don't duplicate.
     entries.retain(|e| e.path != entry.path);
     entries.insert(0, entry);
     entries.truncate(HISTORY_CAP);
     write(app, &entries)?;
+    drop(_guard);
     // Keep the tray "Recents" submenu in sync with the newest save.
     crate::refresh_tray_recents(app);
     Ok(())

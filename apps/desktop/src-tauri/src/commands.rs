@@ -1,5 +1,6 @@
 use crate::capture::{clamp_rect, CaptureRect};
 use crate::error::AppError;
+use crate::lock_recover;
 use crate::overlay;
 use crate::settings::{ExportFormat, Settings};
 use image::codecs::jpeg::JpegEncoder;
@@ -92,10 +93,11 @@ pub async fn finish_capture(
     // that corner WOULD bake it into the crop. It has already flashed in (the
     // user got instant feedback), so hide it for the ~60ms grab and re-show it
     // populated (Ready) afterwards — correct capture, still instant-feeling.
+    let target = overlay_monitor_pos(&app, monitor_index);
     hide_capture_chrome(&app)?;
     let img = tauri::async_runtime::spawn_blocking(move || {
         wait_for_compositor(CompositorSettle::Region);
-        capture_region_image_by_index(rect, monitor_index)
+        capture_region_image_by_pos(rect, target)
     })
     .await
     .map_err(|e| AppError::Capture(format!("capture task failed: {e}")))??;
@@ -117,17 +119,18 @@ pub async fn scroll_start(
 ) -> Result<(), AppError> {
     // Hide our chrome (overlay/toast) before the first grab, like the region
     // path, so the dim overlay doesn't tint the frame.
+    let target = overlay_monitor_pos(&app, monitor_index);
     hide_capture_chrome(&app)?;
     let img = tauri::async_runtime::spawn_blocking(move || {
         wait_for_compositor(CompositorSettle::Region);
-        capture_region_image_by_index(rect, monitor_index)
+        capture_region_image_by_pos(rect, target)
     })
     .await
     .map_err(|e| AppError::Capture(format!("capture task failed: {e}")))??;
 
-    *session.0.lock().unwrap() = Some(crate::scroll::ScrollState {
+    *lock_recover(&session.0) = Some(crate::scroll::ScrollState {
         rect,
-        monitor_index,
+        target,
         frames: vec![img],
     });
     crate::scroll::show_control(&app, 1)
@@ -141,25 +144,25 @@ pub async fn scroll_capture_frame(
     session: State<'_, crate::scroll::ScrollSession>,
 ) -> Result<(), AppError> {
     // Read the region + monitor while NOT holding the lock across the await.
-    let (rect, monitor_index) = {
-        let guard = session.0.lock().unwrap();
+    let (rect, target) = {
+        let guard = lock_recover(&session.0);
         let state = guard
             .as_ref()
             .ok_or_else(|| AppError::Capture("no scroll session".into()))?;
-        (state.rect, state.monitor_index)
+        (state.rect, state.target)
     };
 
     // Hide the control (and other chrome) so it isn't baked into the frame.
     crate::scroll::hide_control(&app)?;
     let img = tauri::async_runtime::spawn_blocking(move || {
         wait_for_compositor(CompositorSettle::Region);
-        capture_region_image_by_index(rect, monitor_index)
+        capture_region_image_by_pos(rect, target)
     })
     .await
     .map_err(|e| AppError::Capture(format!("capture task failed: {e}")))??;
 
     let frames = {
-        let mut guard = session.0.lock().unwrap();
+        let mut guard = lock_recover(&session.0);
         let state = guard
             .as_mut()
             .ok_or_else(|| AppError::Capture("no scroll session".into()))?;
@@ -179,17 +182,23 @@ pub fn scroll_finish(
     session: State<'_, crate::scroll::ScrollSession>,
     buffer: State<'_, CaptureBuffer>,
 ) -> Result<(), AppError> {
-    let frames = session
-        .0
-        .lock()
-        .unwrap()
-        .take()
-        .map(|s| s.frames)
-        .ok_or_else(|| AppError::Capture("no scroll session".into()))?;
+    // Stitch from a CLONE of the frames first; only clear the session once the
+    // whole finish (stitch + dispatch) succeeds. If stitching or dispatch fails,
+    // the session (and its captured frames) stays intact so the user can retry
+    // "Done" instead of silently losing every frame.
+    let stitched = {
+        let guard = lock_recover(&session.0);
+        let state = guard
+            .as_ref()
+            .ok_or_else(|| AppError::Capture("no scroll session".into()))?;
+        crate::stitch::stitch_all(&state.frames)
+            .ok_or_else(|| AppError::Capture("no frames captured".into()))?
+    };
     crate::scroll::hide_control(&app)?;
-    let stitched = crate::stitch::stitch_all(&frames)
-        .ok_or_else(|| AppError::Capture("no frames captured".into()))?;
-    dispatch_capture(&app, &buffer, stitched)
+    dispatch_capture(&app, &buffer, stitched)?;
+    // Success: now it's safe to drop the session.
+    *lock_recover(&session.0) = None;
+    Ok(())
 }
 
 /// Cancel the session without stitching: drop frames and hide the control.
@@ -198,7 +207,7 @@ pub fn scroll_cancel(
     app: AppHandle,
     session: State<'_, crate::scroll::ScrollSession>,
 ) -> Result<(), AppError> {
-    *session.0.lock().unwrap() = None;
+    *lock_recover(&session.0) = None;
     crate::scroll::hide_control(&app)
 }
 
@@ -216,7 +225,7 @@ fn dispatch_capture(
     match settings.after_capture {
         crate::settings::AfterCapture::OpenEditor => {
             // Editor needs the PNG buffered before it pulls; encode up front.
-            *buffer.0.lock().unwrap() = Some(encode_png(img)?);
+            *lock_recover(&buffer.0) = Some(encode_png(img)?);
             if let Some(main) = app.get_webview_window("main") {
                 main.show().map_err(|e| AppError::Overlay(e.to_string()))?;
                 main.set_focus()
@@ -237,7 +246,7 @@ fn dispatch_capture(
             // fresh one for fullscreen/window now that the grab is done and the
             // toast can no longer land in-frame). Copy + save follow.
             let bytes = encode_png(img)?;
-            *buffer.0.lock().unwrap() = Some(bytes.clone());
+            *lock_recover(&buffer.0) = Some(bytes.clone());
             let _ = crate::toast::show_toast(app, crate::toast::ToastPhase::Ready);
             if let Some(main) = app.get_webview_window("main") {
                 let _ = main.hide();
@@ -250,7 +259,7 @@ fn dispatch_capture(
             // clipboard + save stay in JS. Buffer the raw PNG first (so the
             // toast preview peek succeeds), flip the toast to "Ready", then hand
             // the styling work to the webview.
-            *buffer.0.lock().unwrap() = Some(encode_png(img)?);
+            *lock_recover(&buffer.0) = Some(encode_png(img)?);
             let _ = crate::toast::show_toast(app, crate::toast::ToastPhase::Ready);
             let payload = AutoCapturePayload {
                 mode: settings.after_capture,
@@ -313,10 +322,11 @@ pub async fn capture_fullscreen(
 ) -> Result<(), AppError> {
     // Hide our own chrome BEFORE capturing so it doesn't appear in the frame.
     // Fullscreen grabs the whole monitor, so the toast MUST be hidden too.
+    let target = overlay_monitor_pos(&app, monitor_index);
     hide_capture_chrome(&app)?;
     let img = tauri::async_runtime::spawn_blocking(move || {
         wait_for_compositor(CompositorSettle::FullScreen);
-        capture_full_monitor_image(monitor_index)
+        capture_full_monitor_image(target)
     })
     .await
     .map_err(|e| AppError::Capture(format!("capture task failed: {e}")))??;
@@ -604,10 +614,7 @@ pub fn show_capture_toast(app: AppHandle) -> Result<(), AppError> {
 /// `take_capture`. Returns the raw PNG via `Response` (no base64/JSON bloat).
 #[tauri::command]
 pub fn toast_preview(buffer: State<'_, CaptureBuffer>) -> Result<Response, AppError> {
-    let bytes = buffer
-        .0
-        .lock()
-        .unwrap()
+    let bytes = lock_recover(&buffer.0)
         .clone()
         .ok_or_else(|| AppError::Capture("no capture available".into()))?;
     Ok(Response::new(bytes))
@@ -673,18 +680,21 @@ pub fn pin_dismiss(app: AppHandle) -> Result<(), AppError> {
     crate::pin::hide_pin(&app)
 }
 
-/// Local timestamp `YYYYMMDD-HHMMSS` for filenames, no external time crate.
+/// Timestamp `days-HHMMSS-mmm` for filenames, no external time crate. The
+/// millisecond suffix keeps two saves in the same second from colliding and
+/// overwriting each other on disk (L4).
 fn timestamp() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
+    let dur = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+        .unwrap_or_default();
+    let secs = dur.as_secs();
+    let millis = dur.subsec_millis();
     // Enough for a unique, sortable name; avoids pulling in chrono.
     let days = secs / 86_400;
     let tod = secs % 86_400;
     let (h, m, s) = (tod / 3600, (tod % 3600) / 60, tod % 60);
-    format!("{days}-{h:02}{m:02}{s:02}")
+    format!("{days}-{h:02}{m:02}{s:02}-{millis:03}")
 }
 
 /// Read the current user settings.
@@ -746,10 +756,7 @@ fn apply_autostart(_app: &AppHandle, _enable: bool) -> Result<(), AppError> {
 /// capture. Each new capture overwrites the buffer, so stale data is impossible.
 #[tauri::command]
 pub fn take_capture(buffer: State<'_, CaptureBuffer>) -> Result<Response, AppError> {
-    let bytes = buffer
-        .0
-        .lock()
-        .unwrap()
+    let bytes = lock_recover(&buffer.0)
         .clone()
         .ok_or_else(|| AppError::Capture("no capture available".into()))?;
     Ok(Response::new(bytes))
@@ -772,11 +779,63 @@ pub async fn capture_region(
     Ok(Response::new(bytes))
 }
 
-/// Blocking capture selecting the monitor by enumeration index (matches the
-/// overlay window ordering). Falls back to the primary monitor when `None`.
-fn capture_region_image_by_index(
+/// Physical top-left of a monitor, used as a stable key to match a Tauri
+/// overlay monitor to the corresponding `xcap::Monitor` (their enumeration
+/// orders are NOT guaranteed to agree — see M3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MonitorPos {
+    pub x: i32,
+    pub y: i32,
+}
+
+/// Resolve the overlay's monitor index to the target monitor's physical
+/// position via Tauri's monitor list, so capture can match the SAME monitor in
+/// xcap by position rather than by a (possibly mismatched) enumeration index.
+/// Returns `None` when the index is absent or can't be resolved, in which case
+/// callers fall back to primary-or-first.
+fn overlay_monitor_pos(app: &AppHandle, monitor_index: Option<usize>) -> Option<MonitorPos> {
+    let index = monitor_index?;
+    let monitors = app.available_monitors().ok()?;
+    let m = monitors.get(index)?;
+    let p = m.position();
+    Some(MonitorPos { x: p.x, y: p.y })
+}
+
+/// Index of the monitor whose position matches `target`, given each monitor's
+/// (optional) position in enumeration order. Pure so M3's matching logic is
+/// unit-testable without a display/capture backend. `None` = no match.
+fn match_monitor_index(positions: &[Option<MonitorPos>], target: MonitorPos) -> Option<usize> {
+    positions.iter().position(|p| *p == Some(target))
+}
+
+/// Find the `xcap::Monitor` whose top-left matches `target` (M3: match by
+/// position, not enumeration index). Falls back to primary-or-first when no
+/// position is given or none matches.
+fn pick_monitor(monitors: Vec<Monitor>, target: Option<MonitorPos>) -> Result<Monitor, AppError> {
+    if let Some(t) = target {
+        let positions: Vec<Option<MonitorPos>> =
+            monitors.iter().map(xcap_monitor_pos).collect();
+        if let Some(i) = match_monitor_index(&positions, t) {
+            return Ok(monitors.into_iter().nth(i).expect("index just found"));
+        }
+    }
+    primary_or_first(monitors)
+}
+
+/// The `xcap::Monitor`'s physical top-left, or `None` if it can't be read.
+fn xcap_monitor_pos(m: &Monitor) -> Option<MonitorPos> {
+    match (m.x(), m.y()) {
+        (Ok(x), Ok(y)) => Some(MonitorPos { x, y }),
+        _ => None,
+    }
+}
+
+/// Blocking capture selecting the monitor by physical position (matching the
+/// overlay's monitor — see M3). Falls back to primary-or-first when `target` is
+/// `None` or unmatched.
+fn capture_region_image_by_pos(
     rect: CaptureRect,
-    monitor_index: Option<usize>,
+    target: Option<MonitorPos>,
 ) -> Result<RgbaImage, AppError> {
     let monitors =
         Monitor::all().map_err(|e| AppError::Capture(format!("enumerate monitors: {e}")))?;
@@ -784,16 +843,7 @@ fn capture_region_image_by_index(
         return Err(AppError::Capture("no monitors found".into()));
     }
 
-    let monitor = match monitor_index {
-        Some(i) => monitors
-            .into_iter()
-            .nth(i)
-            .ok_or_else(|| AppError::Capture(format!("monitor index {i} out of range")))?,
-        None => monitors
-            .into_iter()
-            .find(|m| m.is_primary().unwrap_or(false))
-            .ok_or_else(|| AppError::Capture("no primary monitor".into()))?,
-    };
+    let monitor = pick_monitor(monitors, target)?;
 
     let full = monitor
         .capture_image()
@@ -802,23 +852,15 @@ fn capture_region_image_by_index(
     Ok(crop_rgba(&full, clamped))
 }
 
-/// Blocking full-monitor capture by enumeration index (matches overlay order).
-fn capture_full_monitor_image(monitor_index: Option<usize>) -> Result<RgbaImage, AppError> {
+/// Blocking full-monitor capture by physical position (matches the overlay's
+/// monitor — see M3). Falls back to primary-or-first when unmatched.
+fn capture_full_monitor_image(target: Option<MonitorPos>) -> Result<RgbaImage, AppError> {
     let monitors =
         Monitor::all().map_err(|e| AppError::Capture(format!("enumerate monitors: {e}")))?;
     if monitors.is_empty() {
         return Err(AppError::Capture("no monitors found".into()));
     }
-    let monitor = match monitor_index {
-        Some(i) => monitors
-            .into_iter()
-            .nth(i)
-            .ok_or_else(|| AppError::Capture(format!("monitor index {i} out of range")))?,
-        None => monitors
-            .into_iter()
-            .find(|m| m.is_primary().unwrap_or(false))
-            .ok_or_else(|| AppError::Capture("no primary monitor".into()))?,
-    };
+    let monitor = pick_monitor(monitors, target)?;
     monitor
         .capture_image()
         .map_err(|e| AppError::Capture(format!("capture image: {e}")))
@@ -856,10 +898,7 @@ fn capture_region_png(rect: CaptureRect, monitor_id: Option<u32>) -> Result<Vec<
             .into_iter()
             .find(|m| m.id().map(|mid| mid == id).unwrap_or(false))
             .ok_or_else(|| AppError::Capture(format!("monitor {id} not found")))?,
-        None => monitors
-            .into_iter()
-            .find(|m| m.is_primary().unwrap_or(false))
-            .ok_or_else(|| AppError::Capture("no primary monitor".into()))?,
+        None => primary_or_first(monitors)?,
     };
 
     let full = monitor
@@ -869,6 +908,22 @@ fn capture_region_png(rect: CaptureRect, monitor_id: Option<u32>) -> Result<Vec<
     let clamped = clamp_rect(rect, full.width(), full.height())?;
     let cropped = crop_rgba(&full, clamped);
     encode_png(cropped)
+}
+
+/// Pick the primary monitor, falling back to the first enumerated monitor when
+/// none is flagged primary (some systems/headless setups flag none). `monitors`
+/// is assumed non-empty (callers check first).
+fn primary_or_first(monitors: Vec<Monitor>) -> Result<Monitor, AppError> {
+    let mut fallback: Option<Monitor> = None;
+    for m in monitors.into_iter() {
+        if m.is_primary().unwrap_or(false) {
+            return Ok(m);
+        }
+        if fallback.is_none() {
+            fallback = Some(m);
+        }
+    }
+    fallback.ok_or_else(|| AppError::Capture("no monitors found".into()))
 }
 
 /// Crop an RGBA image to the given rect (assumed already clamped to bounds).
@@ -936,6 +991,50 @@ mod tests {
         assert_eq!(out.height(), 2);
         assert_eq!(*out.get_pixel(0, 0), Rgba([10, 10, 0, 255]));
         assert_eq!(*out.get_pixel(1, 1), Rgba([20, 20, 0, 255]));
+    }
+
+    #[test]
+    fn match_monitor_index_finds_by_position_not_order() {
+        // xcap enumeration order differs from the overlay's; matching must key
+        // on position so the correct monitor is picked regardless of index.
+        let positions = vec![
+            Some(MonitorPos { x: 1920, y: 0 }),
+            Some(MonitorPos { x: 0, y: 0 }),
+        ];
+        // Overlay's monitor at (0,0) is xcap index 1 here, not 0.
+        assert_eq!(
+            match_monitor_index(&positions, MonitorPos { x: 0, y: 0 }),
+            Some(1)
+        );
+        assert_eq!(
+            match_monitor_index(&positions, MonitorPos { x: 1920, y: 0 }),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn match_monitor_index_none_when_no_match() {
+        let positions = vec![Some(MonitorPos { x: 0, y: 0 })];
+        assert_eq!(
+            match_monitor_index(&positions, MonitorPos { x: 100, y: 100 }),
+            None
+        );
+        // An unreadable position never matches.
+        let positions = vec![None];
+        assert_eq!(
+            match_monitor_index(&positions, MonitorPos { x: 0, y: 0 }),
+            None
+        );
+    }
+
+    #[test]
+    fn timestamp_has_millisecond_suffix() {
+        let ts = timestamp();
+        // Shape: days-HHMMSS-mmm — three dash-separated groups, last is 3 digits.
+        let parts: Vec<&str> = ts.split('-').collect();
+        assert_eq!(parts.len(), 3, "timestamp {ts} should have a ms suffix");
+        assert_eq!(parts[2].len(), 3);
+        assert!(parts[2].chars().all(|c| c.is_ascii_digit()));
     }
 
     #[test]

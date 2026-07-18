@@ -1,9 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { writeImage } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { editor, encodeHandoff, HANDOFF_PARAM } from "@screenxshot/editor";
+import { editor, encodeHandoff, HANDOFF_PARAM, isValidPreset } from "@screenxshot/editor";
 import { bytesToObjectUrl } from "./bytesToObjectUrl";
 import { needsNativeClipboard, needsNativeSave } from "./clipboardFallback";
 import { joinSavePath } from "./savePath";
@@ -124,6 +124,11 @@ async function handleAutoCapture(payload: AutoCapturePayload): Promise<void> {
       await writeImage(bytes);
     } catch (err) {
       console.error("auto clipboard failed", err);
+      // The toast (a separate window) is showing "Copied to clipboard" — correct
+      // it so the hint reflects reality (M6). Broadcast; the toast listens.
+      await emit("toast:copy-failed").catch((e) =>
+        console.error("toast copy-failed emit failed", e),
+      );
     }
     // Best-effort auto-save; ignored silently when no folder is configured.
     await invoke("auto_save_capture", { bytes: Array.from(bytes) }).catch((err) =>
@@ -202,8 +207,17 @@ export function buildContinueOnWebUrl(): string {
  * Open the current editor state in the browser via a privacy-preserving
  * hand-off URL (fragment-encoded style + ops, no image bytes).
  */
+// Browsers/OSes cap how long a URL an external open can carry; past this the
+// hand-off can be silently truncated or rejected. Warn before opening (L13).
+const MAX_HANDOFF_URL_LEN = 32000;
+
 export async function continueOnWeb(): Promise<void> {
   const url = buildContinueOnWebUrl();
+  if (url.length > MAX_HANDOFF_URL_LEN) {
+    console.error("continue on web: handoff payload too large", url.length);
+    editor.flash("Too many edits to open on web");
+    return;
+  }
   try {
     await openUrl(url);
     editor.flash("Opened in browser");
@@ -326,10 +340,20 @@ export async function importPresetFromFile(): Promise<unknown | null> {
     directory: false,
     filters: [{ name: "JSON", extensions: ["json"] }],
   });
-  if (typeof picked !== "string") return null;
+  if (typeof picked !== "string") return null; // user cancelled
   const bytes = await invoke<ArrayBuffer>("read_image_file", { path: picked });
   const text = new TextDecoder().decode(new Uint8Array(bytes));
-  return JSON.parse(text);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    // Malformed JSON — surface via the caller's "Import failed" message (M7).
+    throw new Error("Selected file is not valid JSON", { cause: err });
+  }
+  if (!isValidPreset(parsed)) {
+    throw new Error("Selected file is not a valid preset");
+  }
+  return parsed;
 }
 
 /** One saved-capture record from the Rust history index. */

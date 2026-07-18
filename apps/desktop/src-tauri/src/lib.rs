@@ -12,7 +12,15 @@ mod toast;
 pub use error::AppError;
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
+
+/// Lock a `Mutex`, recovering the guard if the lock was poisoned by a panicking
+/// thread. A poisoned lock would otherwise brick every future capture op (all
+/// `.lock().unwrap()` calls panic forever); recovering the inner guard keeps the
+/// app usable — the happy path is identical to `.lock().unwrap()`.
+pub fn lock_recover<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{TrayIcon, TrayIconBuilder, TrayIconEvent},
@@ -20,9 +28,17 @@ use tauri::{
 };
 
 /// Holds the tray icon so its menu (esp. the "Recents" submenu) can be rebuilt
-/// after new captures are saved.
+/// after new captures are saved, plus a snapshot of the recents paths captured
+/// at menu-build time. The snapshot is what a "Recents" click resolves against,
+/// so a capture between build and click can't shift the list and open the wrong
+/// file (the menu item ids index THIS snapshot, not the live history).
 #[derive(Default)]
-pub struct TrayHandle(pub Mutex<Option<TrayIcon>>);
+pub struct TrayHandle {
+    pub icon: Mutex<Option<TrayIcon>>,
+    /// Paths shown in the current "Recents" submenu, in menu order. Item id
+    /// `recent-<i>` maps to `recents[i]`.
+    pub recents: Mutex<Vec<String>>,
+}
 
 /// Tracks whether the one-time startup reveal of the main window has already
 /// happened (via `main_ready` after first paint, or the fallback timer). Once
@@ -274,6 +290,11 @@ const TRAY_RECENTS: usize = 5;
 /// yields a single disabled placeholder so the submenu is never empty.
 fn build_recents_submenu(app: &tauri::AppHandle) -> Result<Submenu<tauri::Wry>, Box<dyn std::error::Error>> {
     let recents = history::recent(app, TRAY_RECENTS);
+    // Snapshot the paths (in menu order) so a click resolves against exactly
+    // what's shown, even if new captures shift the live history afterwards.
+    if let Some(state) = app.try_state::<TrayHandle>() {
+        *lock_recover(&state.recents) = recents.iter().map(|e| e.path.clone()).collect();
+    }
     if recents.is_empty() {
         let empty = MenuItem::with_id(app, "recent-empty", "No recent captures", false, None::<&str>)?;
         return Ok(Submenu::with_items(app, "Recents", true, &[&empty])?);
@@ -302,18 +323,24 @@ fn recent_label(entry: &history::HistoryEntry) -> String {
         .unwrap_or_else(|| entry.path.clone())
 }
 
-/// Open the history entry at `index` in the editor: reveal the main window and
+/// Open the recents entry at `index` in the editor: reveal the main window and
 /// emit `history:open` with its path so the webview loads the file bytes.
+///
+/// `index` refers to the snapshot taken when the submenu was built (see
+/// `TrayHandle::recents`), NOT the live history — so a capture between build and
+/// click can't shift the list and open the wrong file.
 fn open_recent(app: &tauri::AppHandle, index: usize) {
     use tauri::Emitter;
-    let recents = history::recent(app, TRAY_RECENTS);
-    let Some(entry) = recents.get(index) else {
+    let Some(state) = app.try_state::<TrayHandle>() else {
+        return;
+    };
+    let Some(path) = lock_recover(&state.recents).get(index).cloned() else {
         return;
     };
     if let Err(e) = show_main_window(app) {
         eprintln!("warning: show main window failed: {e}");
     }
-    if let Err(e) = app.emit("history:open", entry.path.clone()) {
+    if let Err(e) = app.emit("history:open", path) {
         eprintln!("warning: emit history:open failed: {e}");
     }
 }
@@ -345,7 +372,7 @@ pub fn refresh_tray_recents(app: &tauri::AppHandle) {
     let Some(state) = app.try_state::<TrayHandle>() else {
         return;
     };
-    let guard = state.0.lock().unwrap();
+    let guard = lock_recover(&state.icon);
     let Some(tray) = guard.as_ref() else {
         return;
     };
@@ -408,7 +435,7 @@ fn build_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> 
         })
         .build(app)?;
     if let Some(state) = app.try_state::<TrayHandle>() {
-        *state.0.lock().unwrap() = Some(tray);
+        *lock_recover(&state.icon) = Some(tray);
     }
     Ok(())
 }

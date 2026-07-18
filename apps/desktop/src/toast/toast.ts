@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { writeImage } from "@tauri-apps/plugin-clipboard-manager";
+import { remainingAfterPause } from "./remaining";
 
 const DEFAULT_DURATION_MS = 5000;
 
@@ -31,6 +32,14 @@ const preview = document.getElementById("toastpreview") as HTMLImageElement;
 let timer: number | undefined;
 let done = false;
 let previewUrl: string | undefined;
+// Auto-dismiss timing (M4): the time the current run began and how many ms are
+// left. On hover we pause and bank the remainder; on leave we resume with it so
+// the JS timeout tracks the CSS bar instead of restarting at full duration.
+let runStartedAt = 0;
+let remainingMs = 0;
+// Bumped on every setPhase(); an in-flight loadPreview() bails if it changed so a
+// slow prior fetch can't re-show a superseded capture's thumbnail (H1).
+let phaseGen = 0;
 
 function clearTimer(): void {
   if (timer !== undefined) {
@@ -68,18 +77,31 @@ async function copyRaw(): Promise<void> {
   await writeImage(new Uint8Array(bytes));
 }
 
+/** Surface an action failure to the user via the toast hint (M5/M6). */
+function showError(message: string): void {
+  hint.textContent = message;
+}
+
 /** Run an inline toast action. Copy/Copy-styled keep the toast up (quick
  * actions); Pin/Edit hand off to another window and end the toast's lifecycle
  * (Rust hides it). */
 function runAction(action: ToastAction): void {
   switch (action) {
     case "copy":
-      void copyRaw().catch((err) => console.error("toast copy failed", err));
+      // Once the toast is consumed (pin/edit/timeout) or superseded by a new
+      // capture, a late click would copy the wrong image — no-op instead (M5).
+      if (done) return;
+      void copyRaw().catch((err) => {
+        console.error("toast copy failed", err);
+        showError("Copy failed");
+      });
       return;
     case "copy-styled":
-      void invoke("toast_copy_styled").catch((err) =>
-        console.error("toast copy styled failed", err),
-      );
+      if (done) return;
+      void invoke("toast_copy_styled").catch((err) => {
+        console.error("toast copy styled failed", err);
+        showError("Copy failed");
+      });
       return;
     case "pin":
       if (done) return;
@@ -114,13 +136,19 @@ function startCountdown(): void {
   bar.classList.remove("run");
   void bar.offsetWidth; // reflow
   bar.classList.add("run");
+  runStartedAt = Date.now();
+  remainingMs = dismissMs;
   timer = window.setTimeout(timeout, dismissMs);
 }
 
 /** Pull the buffered PNG bytes and show them as the preview thumbnail. */
 async function loadPreview(): Promise<void> {
+  const gen = phaseGen;
   try {
     const bytes = await invoke<ArrayBuffer>("toast_preview");
+    // A newer phase superseded this load while awaiting; drop the stale bytes so
+    // we neither re-show the previous capture nor leak a fresh URL (H1).
+    if (gen !== phaseGen) return;
     revokePreview();
     previewUrl = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
     preview.src = previewUrl;
@@ -132,6 +160,8 @@ async function loadPreview(): Promise<void> {
 }
 
 function setPhase(phase: Phase): void {
+  // Invalidate any in-flight loadPreview() from a prior phase (H1).
+  phaseGen++;
   toast.classList.toggle("is-capturing", phase === "capturing");
   toast.classList.toggle("is-ready", phase === "ready");
   if (phase === "capturing") {
@@ -167,6 +197,9 @@ actions.addEventListener("click", (e) => {
 // Pause the countdown while hovering so the user has time to decide.
 toast.addEventListener("mouseenter", () => {
   if (toast.classList.contains("is-capturing")) return;
+  if (dismissMs <= 0) return;
+  // Bank the time left so resume continues from here rather than restarting.
+  remainingMs = remainingAfterPause(dismissMs, runStartedAt, Date.now());
   clearTimer();
   bar.style.animationPlayState = "paused";
 });
@@ -176,12 +209,22 @@ toast.addEventListener("mouseleave", () => {
   if (dismissMs <= 0) return;
   bar.style.animationPlayState = "running";
   clearTimer();
-  timer = window.setTimeout(timeout, dismissMs);
+  // Resume from the banked remainder, keeping the JS timeout in sync with the
+  // CSS bar (which the browser also resumes from its paused position).
+  runStartedAt = Date.now() - (dismissMs - remainingMs);
+  timer = window.setTimeout(timeout, remainingMs);
 });
 
 void listen<PhaseEvent>("toast:phase", (e) => {
   dismissMs = e.payload.dismiss_ms;
   setPhase(e.payload.phase);
+});
+
+// The auto-copy flow (main window) failed to write the clipboard; correct the
+// optimistic "Copied to clipboard" hint (M6).
+void listen("toast:copy-failed", () => {
+  if (toast.classList.contains("is-capturing")) return;
+  showError("Copy failed");
 });
 
 // Initial phase comes from the URL hash the Rust builder set on first show.

@@ -26,13 +26,17 @@ function PinApp() {
   useEffect(() => {
     // Load immediately on first mount (the window may already be shown), and
     // reload whenever Rust signals a fresh pin.
+    let mounted = true;
     void loadPinnedCapture().catch((err) => console.error("pin load failed", err));
     const un = listen("pin:load", () => {
+      // The listen promise can resolve after unmount; ignore late events (L10).
+      if (!mounted) return;
       void loadPinnedCapture().catch((err) =>
         console.error("pin reload failed", err),
       );
     });
     return () => {
+      mounted = false;
       void un.then((fn) => fn());
     };
   }, []);

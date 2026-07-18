@@ -26,6 +26,12 @@ const winhiLabelEl = document.getElementById("winhi-label") as HTMLElement;
 
 let start: { x: number; y: number } | null = null;
 let finished = false;
+// True from the moment a capture is committed (self-timer countdown may be
+// running, chrome may be blanked) until the deterministic re-arm for the NEXT
+// capture. Guards `overlay:arm` from resetting chrome / clearing the countdown
+// mid-flight, which would otherwise bake restored chrome or a half-cleared digit
+// into the grab (M2).
+let capturing = false;
 // Long-screenshot mode: the next region drag starts a scrolling capture session
 // (scroll_start) instead of a one-shot grab (finish_capture). Toggled by the
 // overlay's "Long screenshot" toolbar button.
@@ -66,6 +72,7 @@ async function cancel() {
 // capture and every later capture ignores all input.
 function arm() {
   finished = false;
+  capturing = false;
   longMode = false;
   document.getElementById("scroll")?.classList.remove("is-active");
   exitPicking();
@@ -87,7 +94,14 @@ void win.onFocusChanged(({ payload: focused }) => {
 });
 
 // Deterministic re-arm: Rust emits this whenever it reveals a reused overlay.
-void win.listen("overlay:arm", () => arm());
+// Ignore it while a capture/countdown is mid-flight (M2) — re-arming then would
+// call resetSelection()/clearCountdown() and bake restored chrome or a
+// half-cleared countdown digit into the grab. The in-flight path clears
+// `capturing` once its invoke completes, so the NEXT capture's reveal re-arms.
+void win.listen("overlay:arm", () => {
+  if (capturing) return;
+  arm();
+});
 
 window.addEventListener("pointerdown", (e) => {
   if (finished || picking) return;
@@ -116,12 +130,19 @@ window.addEventListener("pointerup", async (e) => {
   if (picking) return;
   if (!start || finished) return;
   const cssRect = normalizeRect(start, { x: e.clientX, y: e.clientY });
-  resetSelection();
   if (!isMeaningfulSelection(cssRect)) {
+    resetSelection();
     await cancel();
     return;
   }
   finished = true;
+  capturing = true;
+  // Blank the chrome (dim/toolbar/hint/selection) before the grab so the region
+  // capture is flicker-free and never includes our own chrome — matching the
+  // whole-screen/window paths, not resetSelection() which RESTORES chrome (M3).
+  // runSelfTimer() re-shows just the countdown digit on top of the blanked
+  // surface and clears it before the grab.
+  blankOverlay();
   await runSelfTimer();
   const physRect = toPhysicalRect(cssRect, scaleFactor);
   // Long-screenshot mode routes the same region to a scrolling-capture session
@@ -130,12 +151,14 @@ window.addEventListener("pointerup", async (e) => {
     await invoke("scroll_start", { rect: physRect, monitorIndex }).catch((err) =>
       console.error("scroll start failed", err),
     );
+    capturing = false;
     return;
   }
   await invoke("finish_capture", {
     rect: physRect,
     monitorIndex,
   }).catch((err) => console.error("finish capture failed", err));
+  capturing = false;
 });
 
 window.addEventListener("keydown", (e) => {
@@ -190,11 +213,15 @@ async function runSelfTimer(): Promise<void> {
 async function captureScreen() {
   if (finished) return;
   finished = true;
-  await runSelfTimer();
+  capturing = true;
+  // Blank first so the countdown digit shows on an already-clean surface, then
+  // runSelfTimer clears it before the grab.
   blankOverlay();
+  await runSelfTimer();
   await invoke("capture_fullscreen", { monitorIndex }).catch((err) =>
     console.error("capture fullscreen failed", err),
   );
+  capturing = false;
 }
 
 // ----- Window-picker mode -------------------------------------------------
@@ -276,15 +303,24 @@ function onPickMove(e: PointerEvent) {
 }
 
 async function onPickClick() {
-  if (!picking || finished || !hovered) return;
+  if (!picking || finished) return;
+  // Clicked empty space / missed every window — nudge the user instead of
+  // silently doing nothing (L11).
+  if (!hovered) {
+    hint.hidden = false;
+    hint.textContent = "No window there — hover a window, then click · Esc to cancel";
+    return;
+  }
   finished = true;
+  capturing = true;
   const id = hovered.id;
   exitPicking();
-  await runSelfTimer();
   blankOverlay();
+  await runSelfTimer();
   await invoke("capture_window_by_id", { id }).catch((err) =>
     console.error("capture window by id failed", err),
   );
+  capturing = false;
 }
 
 /** Toolbar "Window" button: enter the picker (was: instant frontmost grab). */

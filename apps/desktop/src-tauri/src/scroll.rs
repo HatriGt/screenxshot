@@ -37,8 +37,9 @@ pub struct ScrollSession(pub Mutex<Option<ScrollState>>);
 pub struct ScrollState {
     /// Region to grab for every frame (monitor-local physical pixels).
     pub rect: CaptureRect,
-    /// Overlay monitor index the region was drawn on.
-    pub monitor_index: Option<usize>,
+    /// Physical top-left of the monitor the region was drawn on, used to match
+    /// the same `xcap::Monitor` for every frame (see M3). `None` = primary.
+    pub target: Option<crate::commands::MonitorPos>,
     /// Captured frames, top-to-bottom in capture order.
     pub frames: Vec<RgbaImage>,
 }
