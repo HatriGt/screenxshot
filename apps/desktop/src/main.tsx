@@ -26,6 +26,7 @@ function App() {
   const hasImage = useStore(editorStore, (s) => s.hasImage);
   const [defaultSaved, setDefaultSaved] = useState(false);
   const [savedToFolder, setSavedToFolder] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchStatus, setBatchStatus] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -66,9 +67,18 @@ function App() {
   }
 
   async function onSave() {
-    await saveCurrentToFolder();
-    setSavedToFolder(true);
-    window.setTimeout(() => setSavedToFolder(false), 1600);
+    // Await the real write and only claim success if it actually succeeded —
+    // a deleted/unwritable folder must surface as a failure, not a false
+    // "Saved" (L1).
+    try {
+      await saveCurrentToFolder();
+      setSavedToFolder(true);
+      window.setTimeout(() => setSavedToFolder(false), 1600);
+    } catch (err) {
+      console.error("save failed", err);
+      setSaveFailed(true);
+      window.setTimeout(() => setSaveFailed(false), 2400);
+    }
   }
 
   return (
@@ -104,7 +114,11 @@ function App() {
           {hasImage && (
             <button
               type="button"
-              className={"ds-fab ds-fab--ghost" + (savedToFolder ? " is-ok" : "")}
+              className={
+                "ds-fab ds-fab--ghost" +
+                (savedToFolder ? " is-ok" : "") +
+                (saveFailed ? " is-error" : "")
+              }
               onClick={() => void onSave()}
               title="Save to your chosen folder"
             >
@@ -118,7 +132,7 @@ function App() {
                   <path d="M8 3v5h7M8 21v-6h8v6" />
                 </svg>
               )}
-              <span>{savedToFolder ? "Saved" : "Save"}</span>
+              <span>{saveFailed ? "Save failed" : savedToFolder ? "Saved" : "Save"}</span>
             </button>
           )}
 

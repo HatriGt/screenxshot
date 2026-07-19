@@ -317,10 +317,28 @@ async function onPickClick() {
   exitPicking();
   blankOverlay();
   await runSelfTimer();
-  await invoke("capture_window_by_id", { id }).catch((err) =>
-    console.error("capture window by id failed", err),
-  );
-  capturing = false;
+  try {
+    await invoke("capture_window_by_id", { id });
+    capturing = false;
+  } catch (err) {
+    // The target window likely closed between hover and click. The overlay is
+    // already blanked, so silently swallowing leaves a dead-end. Re-arm the
+    // picker and flash a message so the user can pick another window (L4).
+    console.error("capture window by id failed", err);
+    capturing = false;
+    finished = false;
+    restoreOverlayChrome();
+    await enterPicking();
+    hint.hidden = false;
+    hint.textContent = "That window is gone — pick another · Esc to cancel";
+  }
+}
+
+/** Un-blank the overlay chrome after a failed window grab so picking can resume. */
+function restoreOverlayChrome() {
+  dim.hidden = false;
+  bar.hidden = false;
+  selEl.hidden = true;
 }
 
 /** Toolbar "Window" button: enter the picker (was: instant frontmost grab). */

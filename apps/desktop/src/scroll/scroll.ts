@@ -52,4 +52,11 @@ void listen<ProgressEvent>("scroll:progress", (e) => {
   renderCount(e.payload.frames);
   // A fresh progress push means the prior grab finished; re-enable controls.
   setBusy(false);
+}).then(() => {
+  // The listener is now live. Tell Rust we're ready so it re-emits the current
+  // session count — the initial `scroll:progress` from `show_control` can fire
+  // before this listener registers on a freshly-built control window (M4).
+  void invoke("scroll_ready").catch((err) =>
+    console.error("scroll ready failed", err),
+  );
 });

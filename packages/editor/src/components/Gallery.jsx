@@ -64,7 +64,8 @@ export default function Gallery({ open, onClose, onExport, onImport }) {
   if (!open) return null;
 
   function apply(preset) {
-    editor.applyPreset(preset.style);
+    // Pass the whole envelope; applyPreset reads preset.style.
+    editor.applyPreset(preset);
     onClose();
   }
 
@@ -108,7 +109,13 @@ export default function Gallery({ open, onClose, onExport, onImport }) {
     const r = new FileReader();
     r.onload = () => {
       try {
-        editor.applyPreset(JSON.parse(String(r.result)));
+        const parsed = JSON.parse(String(r.result));
+        if (!isValidPreset(parsed)) {
+          setErr("Invalid preset file");
+          return;
+        }
+        // Pass the canonical envelope; applyPreset reads parsed.style.
+        editor.applyPreset(parsed);
       } catch {
         setErr("Invalid preset file");
       }

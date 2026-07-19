@@ -133,7 +133,7 @@ pub async fn scroll_start(
         target,
         frames: vec![img],
     });
-    crate::scroll::show_control(&app, 1)
+    crate::scroll::show_control(&app, 1, target)
 }
 
 /// Grab one more frame of the session's region and append it. The user scrolls
@@ -170,7 +170,19 @@ pub async fn scroll_capture_frame(
         state.frames.len()
     };
     // Re-show the control with the updated count.
-    crate::scroll::show_control(&app, frames)
+    crate::scroll::show_control(&app, frames, target)
+}
+
+/// Called by the control webview once it has mounted and registered its
+/// `scroll:progress` listener. Re-emits the active session's current frame count
+/// so the first count is never lost to a listen/emit race on a freshly-built
+/// control window (M4). Mirrors the `main_ready` handshake.
+#[tauri::command]
+pub fn scroll_ready(
+    app: AppHandle,
+    session: State<'_, crate::scroll::ScrollSession>,
+) -> Result<(), AppError> {
+    crate::scroll::emit_current_count(&app, &session)
 }
 
 /// Finish the session: stitch every frame into one tall image (de-duplicating
@@ -302,8 +314,7 @@ fn auto_save_bytes(app: &AppHandle, bytes: &[u8]) -> Result<(), AppError> {
         settings.export_format.extension()
     );
     let path = std::path::Path::new(&settings.save_dir).join(name);
-    std::fs::write(&path, out)
-        .map_err(|e| AppError::Encode(format!("write {}: {e}", path.display())))?;
+    write_file(&path, &out)?;
     // Index the save for the history panel + tray Recents (best-effort).
     if let Err(e) = crate::history::record_save(app, &path.to_string_lossy(), Some(bytes)) {
         eprintln!("history record failed: {e}");
@@ -523,11 +534,23 @@ struct AutoCapturePayload {
     style: serde_json::Value,
 }
 
+/// Write bytes to `path`, first creating the parent directory if it's missing
+/// (e.g. the user deleted the save folder between captures). Surfaces the real
+/// I/O error so callers can report a failed save instead of claiming success
+/// (L1).
+fn write_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), AppError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AppError::Encode(format!("create {}: {e}", parent.display())))?;
+    }
+    std::fs::write(path, bytes).map_err(|e| AppError::Encode(format!("write {}: {e}", path.display())))
+}
+
 /// Write PNG bytes to an absolute path chosen by the user (native save-as
 /// fallback when the webview blocks the anchor-download path).
 #[tauri::command]
 pub fn save_png(path: String, bytes: Vec<u8>) -> Result<(), AppError> {
-    std::fs::write(&path, &bytes).map_err(|e| AppError::Encode(format!("write {path}: {e}")))
+    write_file(std::path::Path::new(&path), &bytes)
 }
 
 /// Save capture bytes (always supplied as PNG) to an explicit path, re-encoding
@@ -537,7 +560,7 @@ pub fn save_png(path: String, bytes: Vec<u8>) -> Result<(), AppError> {
 pub fn save_capture_as(app: AppHandle, path: String, bytes: Vec<u8>) -> Result<(), AppError> {
     let format = crate::settings::load(&app).export_format;
     let out = encode_for_export(&bytes, format)?;
-    std::fs::write(&path, out).map_err(|e| AppError::Encode(format!("write {path}: {e}")))
+    write_file(std::path::Path::new(&path), &out)
 }
 
 /// Save auto-captured PNG bytes to the user's chosen folder with a timestamped
@@ -555,8 +578,7 @@ pub fn auto_save_capture(app: AppHandle, bytes: Vec<u8>) -> Result<String, AppEr
         settings.export_format.extension()
     );
     let path = std::path::Path::new(&settings.save_dir).join(name);
-    std::fs::write(&path, out)
-        .map_err(|e| AppError::Encode(format!("write {}: {e}", path.display())))?;
+    write_file(&path, &out)?;
     let path_str = path.to_string_lossy().into_owned();
     // Index the save for the history panel + tray Recents (best-effort).
     if let Err(e) = crate::history::record_save(&app, &path_str, Some(&bytes)) {
@@ -580,7 +602,7 @@ pub fn read_image_file(path: String) -> Result<Response, AppError> {
 /// image-writing commands, which force an `export_format` re-encode.
 #[tauri::command]
 pub fn save_text_file(path: String, text: String) -> Result<(), AppError> {
-    std::fs::write(&path, text).map_err(|e| AppError::Encode(format!("write {path}: {e}")))
+    write_file(std::path::Path::new(&path), text.as_bytes())
 }
 
 /// Save styled PNG bytes into `dir` for the batch-beautify pipeline, re-encoding
@@ -597,8 +619,7 @@ pub fn batch_save(
     let out = encode_for_export(&bytes, format)?;
     let name = format!("{stem}.{}", format.extension());
     let path = std::path::Path::new(&dir).join(name);
-    std::fs::write(&path, out)
-        .map_err(|e| AppError::Encode(format!("write {}: {e}", path.display())))?;
+    write_file(&path, &out)?;
     Ok(path.to_string_lossy().into_owned())
 }
 
@@ -726,9 +747,13 @@ pub fn set_hotkey(app: AppHandle, hotkey: String) -> Result<(), AppError> {
 
     if old != hotkey {
         let _ = app.global_shortcut().unregister(old.as_str());
-        app.global_shortcut()
-            .register(hotkey.as_str())
-            .map_err(|e| AppError::Overlay(format!("register {hotkey}: {e}")))?;
+        if let Err(e) = app.global_shortcut().register(hotkey.as_str()) {
+            // Registration of the new combo failed (e.g. it conflicts with
+            // another app). Restore the prior binding so the user isn't left
+            // with NO working capture hotkey for the session (L7).
+            let _ = app.global_shortcut().register(old.as_str());
+            return Err(AppError::Overlay(format!("register {hotkey}: {e}")));
+        }
     }
 
     current.hotkey = hotkey;
@@ -949,6 +974,20 @@ fn encode_png(img: RgbaImage) -> Result<Vec<u8>, AppError> {
 /// isn't worth the surface area; 90 is a good default for screenshots.
 const JPEG_QUALITY: u8 = 90;
 
+/// Composite an RGBA image over an opaque WHITE background, producing RGB.
+/// Used before JPEG encoding so transparent pixels become white rather than
+/// black (the default `to_rgb8()` behavior). Standard source-over alpha blend.
+fn flatten_over_white(rgba: &RgbaImage) -> image::RgbImage {
+    let mut out = image::RgbImage::new(rgba.width(), rgba.height());
+    for (x, y, px) in rgba.enumerate_pixels() {
+        let [r, g, b, a] = px.0;
+        let a = a as u32;
+        let blend = |c: u8| ((c as u32 * a + 255 * (255 - a)) / 255) as u8;
+        out.put_pixel(x, y, image::Rgb([blend(r), blend(g), blend(b)]));
+    }
+    out
+}
+
 /// Re-encode already-PNG capture bytes into the user's chosen FILE format.
 ///
 /// Clipboard writes always stay PNG (see `copy_image_to_clipboard` / the JS
@@ -959,12 +998,16 @@ fn encode_for_export(png_bytes: &[u8], format: ExportFormat) -> Result<Vec<u8>, 
     match format {
         ExportFormat::Png => Ok(png_bytes.to_vec()),
         ExportFormat::Jpeg => {
+            // JPEG has no alpha. `to_rgb8()` alone drops the alpha channel,
+            // compositing transparent pixels over BLACK. Flatten over WHITE
+            // first so transparent areas render white, not black (L2).
             let rgba = image::load_from_memory_with_format(png_bytes, ImageFormat::Png)
                 .map_err(|e| AppError::Encode(format!("decode png: {e}")))?
-                .to_rgb8();
+                .to_rgba8();
+            let rgb = flatten_over_white(&rgba);
             let mut buf = Cursor::new(Vec::new());
             JpegEncoder::new_with_quality(&mut buf, JPEG_QUALITY)
-                .encode_image(&rgba)
+                .encode_image(&rgb)
                 .map_err(|e| AppError::Encode(format!("encode jpeg: {e}")))?;
             Ok(buf.into_inner())
         }
@@ -991,6 +1034,22 @@ mod tests {
         assert_eq!(out.height(), 2);
         assert_eq!(*out.get_pixel(0, 0), Rgba([10, 10, 0, 255]));
         assert_eq!(*out.get_pixel(1, 1), Rgba([20, 20, 0, 255]));
+    }
+
+    #[test]
+    fn flatten_over_white_composites_transparency_to_white() {
+        let mut src = RgbaImage::new(1, 3);
+        // Fully transparent -> white.
+        src.put_pixel(0, 0, Rgba([0, 0, 0, 0]));
+        // Opaque red -> unchanged.
+        src.put_pixel(0, 1, Rgba([255, 0, 0, 255]));
+        // Half-transparent black -> mid grey (128-ish), NOT black.
+        src.put_pixel(0, 2, Rgba([0, 0, 0, 128]));
+        let out = flatten_over_white(&src);
+        assert_eq!(*out.get_pixel(0, 0), image::Rgb([255, 255, 255]));
+        assert_eq!(*out.get_pixel(0, 1), image::Rgb([255, 0, 0]));
+        let mid = out.get_pixel(0, 2).0[0];
+        assert!(mid > 120 && mid < 135, "half-alpha black should be grey, got {mid}");
     }
 
     #[test]

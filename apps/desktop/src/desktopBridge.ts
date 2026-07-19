@@ -113,10 +113,20 @@ async function blobToBytes(blob: Blob): Promise<Uint8Array> {
  */
 async function handleAutoCapture(payload: AutoCapturePayload): Promise<void> {
   const raw = await invoke<ArrayBuffer>("take_capture");
+  const rawBytes = new Uint8Array(raw);
   const url = bytesToObjectUrl(raw);
   try {
-    const blob = await editor.exportStyledBlob(url, payload.style);
-    const bytes = await blobToBytes(blob);
+    // Render the styled bytes; on failure (bad/corrupt src) fall back to the
+    // RAW PNG so the user still gets SOMETHING on the clipboard rather than an
+    // empty clipboard behind a "Copied" toast (M7).
+    let bytes: Uint8Array;
+    try {
+      const blob = await editor.exportStyledBlob(url, payload.style);
+      bytes = await blobToBytes(blob);
+    } catch (err) {
+      console.error("auto styled render failed, falling back to raw", err);
+      bytes = rawBytes;
+    }
 
     // Clipboard write must complete even though the main window is hidden.
     // Surface failures instead of swallowing them.

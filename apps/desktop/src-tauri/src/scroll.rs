@@ -52,25 +52,51 @@ struct ScrollProgress {
 }
 
 /// Show (or reuse) the floating "Capture next / Done" control in the
-/// bottom-right of the primary monitor, and push the current frame count.
-pub fn show_control(app: &AppHandle, frames: usize) -> Result<(), AppError> {
-    let (x, y) = corner_position(app)?;
+/// bottom-right of the session's target monitor, and push the current frame
+/// count.
+pub fn show_control(
+    app: &AppHandle,
+    frames: usize,
+    target: Option<crate::commands::MonitorPos>,
+) -> Result<(), AppError> {
+    let (x, y) = corner_position(app, target)?;
     let win = match app.get_webview_window(SCROLL_LABEL) {
         Some(win) => win,
-        None => build_control_window(app)?,
+        None => build_control_window(app, target)?,
     };
     win.set_position(LogicalPosition::new(x, y))
         .map_err(|e| AppError::Overlay(e.to_string()))?;
     win.show().map_err(|e| AppError::Overlay(e.to_string()))?;
     win.set_focus().ok();
+    // Emit the current count. A freshly-built control window's webview may not
+    // have registered its `scroll:progress` listener yet, so the first push can
+    // be missed (M4). The webview re-requests the count via `scroll_ready` on
+    // mount; this emit covers the reused-window case.
+    app.emit_to(SCROLL_LABEL, "scroll:progress", ScrollProgress { frames })
+        .map_err(|e| AppError::Overlay(e.to_string()))?;
+    Ok(())
+}
+
+/// Re-emit the active session's current frame count to the control window.
+/// Called by the `scroll_ready` command once the control webview has mounted
+/// and its `scroll:progress` listener is live, so the first count is never lost
+/// to a listen/emit race on a freshly-built window (M4).
+pub fn emit_current_count(app: &AppHandle, session: &ScrollSession) -> Result<(), AppError> {
+    let frames = crate::lock_recover(&session.0)
+        .as_ref()
+        .map(|s| s.frames.len())
+        .unwrap_or(0);
     app.emit_to(SCROLL_LABEL, "scroll:progress", ScrollProgress { frames })
         .map_err(|e| AppError::Overlay(e.to_string()))?;
     Ok(())
 }
 
 /// Build the control window (hidden). Mirrors the toast/pin builders.
-fn build_control_window(app: &AppHandle) -> Result<tauri::WebviewWindow, AppError> {
-    let (x, y) = corner_position(app)?;
+fn build_control_window(
+    app: &AppHandle,
+    target: Option<crate::commands::MonitorPos>,
+) -> Result<tauri::WebviewWindow, AppError> {
+    let (x, y) = corner_position(app, target)?;
     WebviewWindowBuilder::new(app, SCROLL_LABEL, WebviewUrl::App("scroll.html".into()))
         .title("Long screenshot")
         .inner_size(SCROLL_W, SCROLL_H)
@@ -93,7 +119,7 @@ pub fn precreate_control(app: &AppHandle) {
     if app.get_webview_window(SCROLL_LABEL).is_some() {
         return;
     }
-    let _ = build_control_window(app);
+    let _ = build_control_window(app, None);
 }
 
 /// Hide the control window (kept alive for reuse).
@@ -104,11 +130,16 @@ pub fn hide_control(app: &AppHandle) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Bottom-right logical position for the control on the primary monitor.
-fn corner_position(app: &AppHandle) -> Result<(f64, f64), AppError> {
-    let monitor = app
-        .primary_monitor()
-        .map_err(|e| AppError::Overlay(format!("primary monitor: {e}")))?
+/// Bottom-right logical position for the control on the session's target
+/// monitor (the one the region was drawn on). Falls back to the primary monitor
+/// when there is no target or none matches (M5).
+fn corner_position(
+    app: &AppHandle,
+    target: Option<crate::commands::MonitorPos>,
+) -> Result<(f64, f64), AppError> {
+    let monitor = target
+        .and_then(|t| monitor_at(app, t))
+        .or_else(|| app.primary_monitor().ok().flatten())
         .or_else(|| {
             app.available_monitors()
                 .ok()
@@ -117,8 +148,17 @@ fn corner_position(app: &AppHandle) -> Result<(f64, f64), AppError> {
         .ok_or_else(|| AppError::Overlay("no monitor".into()))?;
     let scale = monitor.scale_factor();
     let pos = monitor.position().to_logical::<f64>(scale);
-    let size = monitor.size().to_logical::<f64>(scale);
-    let x = pos.x + size.width - SCROLL_W - MARGIN;
-    let y = pos.y + size.height - SCROLL_H - MARGIN;
+    let x = pos.x + monitor.size().to_logical::<f64>(scale).width - SCROLL_W - MARGIN;
+    let y = pos.y + monitor.size().to_logical::<f64>(scale).height - SCROLL_H - MARGIN;
     Ok((x, y))
+}
+
+/// The Tauri monitor whose physical top-left matches `target`. `target` is
+/// sourced from Tauri's `available_monitors()` positions (see
+/// `overlay_monitor_pos`), so an exact match is reliable.
+fn monitor_at(app: &AppHandle, target: crate::commands::MonitorPos) -> Option<tauri::Monitor> {
+    app.available_monitors().ok()?.into_iter().find(|m| {
+        let p = m.position();
+        p.x == target.x && p.y == target.y
+    })
 }

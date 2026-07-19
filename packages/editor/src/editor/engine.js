@@ -74,7 +74,13 @@ export function mergePreset(base, preset) {
 }
 
 export class Editor {
-  constructor() {
+  // `opts.offscreen` builds a throwaway instance for headless styled export:
+  // it skips the shared-store subscription and the bulk WALLS image decode (the
+  // one wall a style needs is decoded lazily via _ensureWall). Use teardown()
+  // after toBlob to drop canvases/refs. The visible editor uses no options.
+  constructor(opts = {}) {
+    const offscreen = opts.offscreen === true;
+    this.offscreen = offscreen;
     this.state = editorStore.state; // live reference; kept in sync via subscribe
     this.imgCanvas = null;
     this.iw = 0;
@@ -101,6 +107,10 @@ export class Editor {
     this.base = document.createElement("canvas");
     this.bctx = this.base.getContext("2d");
 
+    // Offscreen instances never touch the shared store nor bulk-decode walls;
+    // _ensureWall lazily decodes only the wall a given style needs.
+    if (offscreen) return;
+
     // keep this.state pointing at the latest store snapshot
     this._unsub = editorStore.subscribe(() => {
       this.state = editorStore.state;
@@ -121,6 +131,21 @@ export class Editor {
       };
       im.src = wallSrc(w);
     });
+  }
+
+  /**
+   * Tear down an offscreen instance after export: drop canvas refs so their
+   * backing bitmaps are released. Safe to call once after toBlob resolves.
+   */
+  teardown() {
+    this._unsub && this._unsub();
+    this._unsub = null;
+    this.imgCanvas = null;
+    this.WALLIMG = {};
+    this.anno = this.actx = null;
+    this.tmp = this.tctx = null;
+    this.base = this.bctx = null;
+    this.canvas = this.ctx = null;
   }
 
   mount(refs) {
@@ -449,14 +474,24 @@ export class Editor {
         bw = Math.max(1, Math.round(Math.min(o.w2, this.iw - bx))),
         bh = Math.max(1, Math.round(Math.min(o.h2, this.ih - by)));
       if (bw > 0 && bh > 0) {
-        const rad = Math.max(4, Math.round(Math.min(bw, bh) / 6));
-        this.tmp.width = bw;
-        this.tmp.height = bh;
-        this.tctx.clearRect(0, 0, bw, bh);
+        // Downscale before blurring (like pixelate): running filter:blur() at
+        // full region resolution on every pointermove paint is sluggish on big
+        // captures. Blur a capped-size temp, then upscale — visually close since
+        // the result is blurred anyway. `sc` maps region px -> temp px.
+        const MAX_DIM = 480;
+        const sc = Math.min(1, MAX_DIM / Math.max(bw, bh));
+        const tw = Math.max(1, Math.round(bw * sc)),
+          th = Math.max(1, Math.round(bh * sc));
+        const rad = Math.max(2, Math.round((Math.min(bw, bh) / 6) * sc));
+        this.tmp.width = tw;
+        this.tmp.height = th;
+        this.tctx.clearRect(0, 0, tw, th);
         this.tctx.filter = `blur(${rad}px)`;
-        this.tctx.drawImage(this.imgCanvas, bx, by, bw, bh, 0, 0, bw, bh);
+        this.tctx.imageSmoothingEnabled = true;
+        this.tctx.drawImage(this.imgCanvas, bx, by, bw, bh, 0, 0, tw, th);
         this.tctx.filter = "none";
-        c.drawImage(this.tmp, 0, 0, bw, bh, bx, by, bw, bh);
+        c.imageSmoothingEnabled = true;
+        c.drawImage(this.tmp, 0, 0, tw, th, bx, by, bw, bh);
       }
     } else if (o.type === "text") {
       c.textBaseline = "top";
@@ -1064,17 +1099,37 @@ export class Editor {
     };
   }
 
-  /** Export the current look as a portable, JSON-serializable style preset. */
+  /**
+   * Export the current look as a portable preset ENVELOPE — the canonical shape
+   * shared by built-in presets, isValidPreset, and desktop file import/export:
+   *
+   *   { v: 1, id: string, name: string, style: { <PRESET_KEYS bare> } }
+   *
+   * `style` is the bare `serializePreset()` output (color/size/frame/padding/
+   * srad/shadow/bg). The envelope round-trips through JSON and passes
+   * isValidPreset(), so `applyPreset(exportPreset())` re-applies the same look.
+   */
   exportPreset() {
-    return serializePreset(this.state);
+    return {
+      v: 1,
+      id: "custom-" + Date.now(),
+      name: "Custom preset",
+      style: serializePreset(this.state),
+    };
   }
 
   /**
    * Apply a portable style preset via the existing setBg/applySetting paths
    * (same mechanism default_style uses). Absent keys keep their current value.
+   *
+   * Accepts the canonical ENVELOPE (`{ id, name, style }`) OR, for backward
+   * compat, a bare style object (`{ color, size, ... }`) — callers may pass
+   * either. When `preset.style` exists it is used; otherwise the argument
+   * itself is treated as the bare style.
    */
   applyPreset(preset) {
-    const merged = mergePreset(this.snapshotStyle(), preset);
+    const style = preset && preset.style ? preset.style : preset;
+    const merged = mergePreset(this.snapshotStyle(), style);
     if (merged.bg != null) set({ bg: merged.bg });
     for (const k of ["color", "size", "frame", "padding", "srad", "shadow"])
       if (merged[k] != null) set({ [k]: merged[k] });
@@ -1088,10 +1143,9 @@ export class Editor {
    * visible editor is never disturbed. `style` may be null → built-in defaults.
    */
   async exportStyledBlob(src, style) {
-    const off = new Editor();
-    // Detach from the shared store so the visible editor is never disturbed:
-    // give this instance a private, frozen-in-time state clone.
-    if (off._unsub) off._unsub();
+    // Offscreen build: no shared-store subscription, no bulk WALLS decode.
+    const off = new Editor({ offscreen: true });
+    // Give this instance a private, frozen-in-time state clone.
     off.state = { ...editorStore.state };
     if (style && typeof style === "object") {
       Object.assign(off.state, {
@@ -1129,7 +1183,9 @@ export class Editor {
     });
     off.buildBase();
     off.paint();
-    return await new Promise((r) => off.canvas.toBlob(r, "image/png"));
+    const blob = await new Promise((r) => off.canvas.toBlob(r, "image/png"));
+    off.teardown();
+    return blob;
   }
 
   /** Ensure the wall image with `id` is decoded into `inst.WALLIMG`. */

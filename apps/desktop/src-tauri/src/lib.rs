@@ -209,6 +209,7 @@ pub fn run() {
             commands::list_windows,
             commands::capture_window_by_id,
             commands::scroll_start,
+            commands::scroll_ready,
             commands::scroll_capture_frame,
             commands::scroll_finish,
             commands::scroll_cancel,

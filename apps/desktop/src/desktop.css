@@ -264,6 +264,11 @@ body,
   border-color: rgba(111, 217, 154, 0.5);
   background: rgba(111, 217, 154, 0.12);
 }
+.ds-fab.is-error {
+  color: #f2a3a3;
+  border-color: rgba(242, 163, 163, 0.5);
+  background: rgba(242, 163, 163, 0.12);
+}
 .ds-fab:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;

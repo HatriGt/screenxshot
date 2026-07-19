@@ -1,6 +1,22 @@
+// CANONICAL PRESET SHAPE (single source of truth — desktop importPresetFromFile
+// and exportPresetToFile MUST align to this envelope):
+//
+//   { v?: number, id: string, name: string, style: { <bare style keys> } }
+//
+// where `style` holds the PRESET_KEYS subset (color, size, frame, padding, srad,
+// shadow, bg) — exactly serializePreset()/snapshotStyle() output.
+//
+// Contract:
+//   - editor.exportPreset()  -> returns this envelope (v:1 + generated id/name).
+//   - isValidPreset(preset)  -> true iff envelope has string id+name and a
+//                               non-empty style object. Validate imports with it.
+//   - editor.applyPreset(p)  -> reads p.style (envelope) OR treats p as the bare
+//                               style for backward compat. Desktop should pass
+//                               the parsed ENVELOPE straight through.
+//
 // Built-in style presets for the one-click gallery. Each is a portable preset
-// in the exact shape produced by exportPreset()/serializePreset() (the PRESET_KEYS
-// subset), so applyPreset() and exportStyledBlob() consume them directly.
+// in the exact shape produced by exportPreset() (envelope with `style` holding
+// the PRESET_KEYS subset), so applyPreset() and exportStyledBlob() consume them.
 export const BUILTIN_PRESETS = [
   {
     id: "clean-white",
