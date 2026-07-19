@@ -32,28 +32,41 @@ function formatExtension(format: ExportFormat): string {
 // @screenxshot/editor platform-agnostic: the editor only ever sees a normal
 // image URL via its existing fromSrc().
 
+// Monotonic token so that when several captures load in quick succession, only
+// the most recent decode is allowed to swap the canvas. Without this, two
+// in-flight Image loads can resolve out of order and an OLDER capture can win,
+// showing a random previously-taken screenshot.
+let editorLoadGen = 0;
+
 /**
- * Load raw PNG bytes into the shared editor and revoke the temporary blob URL
- * only AFTER the editor has finished decoding it.
+ * Load raw PNG bytes into the shared editor, decoding the image HERE and handing
+ * the already-decoded element straight to the engine.
  *
- * `editor.fromSrc()` decodes the URL asynchronously via its own detached Image
- * and swaps the canvas on that image's load. Revoking the blob URL before that
- * decode completes makes the editor's load fail silently, leaving the PREVIOUS
- * capture on screen (the capture-staleness bug). So we decode a probe first and
- * only hand the (now browser-cached) URL to the editor once it's ready, then
- * revoke on the next frame — after the editor's cache-hit decode is safely done.
+ * Previously this handed a blob URL to `editor.fromSrc()`, which kicks off its
+ * OWN async decode with no completion callback; the URL was then revoked on the
+ * next frame. If that revoke won the race, the editor's decode failed silently
+ * and the PREVIOUS capture stayed on screen (the staleness bug). Decoding once
+ * here and calling `editor.loadImage()` with the loaded element removes the
+ * second async decode entirely: the URL is only revoked after the editor has
+ * consumed the pixels, and a generation token drops any out-of-order load.
  */
 export function loadBytesIntoEditor(bytes: ArrayBuffer | Uint8Array): void {
+  const gen = ++editorLoadGen;
   const url = bytesToObjectUrl(bytes);
-  const probe = new Image();
-  const finish = () => {
-    editor.fromSrc(url);
-    // Give the editor's cache-hit decode a frame before releasing the URL.
-    requestAnimationFrame(() => URL.revokeObjectURL(url));
+  const img = new Image();
+  const release = () => URL.revokeObjectURL(url);
+  img.onload = () => {
+    // A newer capture started loading while this one decoded — drop it so the
+    // stale image can't overwrite the fresher one.
+    if (gen !== editorLoadGen) {
+      release();
+      return;
+    }
+    editor.loadImage(img);
+    release();
   };
-  probe.onload = finish;
-  probe.onerror = () => URL.revokeObjectURL(url);
-  probe.src = url;
+  img.onerror = release;
+  img.src = url;
 }
 
 async function loadLatestCapture(): Promise<void> {
