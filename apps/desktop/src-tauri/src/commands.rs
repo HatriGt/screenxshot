@@ -475,9 +475,43 @@ fn capture_window_image_by_id(id: u32) -> Result<RgbaImage, AppError> {
         .into_iter()
         .find(|w| w.id().map(|wid| wid == id).unwrap_or(false))
         .ok_or_else(|| AppError::Capture("window no longer available".into()))?;
-    target
-        .capture_image()
-        .map_err(|e| AppError::Capture(format!("capture window: {e}")))
+    fresh_monitor_capture(&target).map_err(|e| AppError::Capture(format!("capture window: {e}")))
+}
+
+/// Grab a guaranteed-fresh frame from an `xcap` capture source (Monitor or
+/// Window), working around a macOS ScreenCaptureKit issue where the persistent
+/// per-display SCStream returns the LAST BUFFERED frame (from before the app
+/// foregrounded / the machine woke / the Space changed). The stale frame is why
+/// even the pure-Rust clipboard path could deliver an old image.
+///
+/// Defense in depth on top of the xcap 0.9 upgrade: perform ONE throwaway
+/// `capture_image()` to flush the stale SCStream buffer, discard it, then grab
+/// again and return the second (fresh) frame. macOS-only; other platforms don't
+/// exhibit the stale-buffer behavior, so they capture once as before.
+fn fresh_monitor_capture<T: XCapCapture>(source: &T) -> Result<RgbaImage, xcap::XCapError> {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = source.capture_image()?;
+    }
+    source.capture_image()
+}
+
+/// Minimal capture abstraction so the warm-and-discard flush works for both
+/// `xcap::Monitor` and `xcap::Window` without duplicating the logic.
+trait XCapCapture {
+    fn capture_image(&self) -> Result<RgbaImage, xcap::XCapError>;
+}
+
+impl XCapCapture for Monitor {
+    fn capture_image(&self) -> Result<RgbaImage, xcap::XCapError> {
+        Monitor::capture_image(self)
+    }
+}
+
+impl XCapCapture for xcap::Window {
+    fn capture_image(&self) -> Result<RgbaImage, xcap::XCapError> {
+        xcap::Window::capture_image(self)
+    }
 }
 
 /// Hide the overlay(s), the editor, and the toast before a full-screen/window
@@ -870,8 +904,7 @@ fn capture_region_image_by_pos(
 
     let monitor = pick_monitor(monitors, target)?;
 
-    let full = monitor
-        .capture_image()
+    let full = fresh_monitor_capture(&monitor)
         .map_err(|e| AppError::Capture(format!("capture image: {e}")))?;
     let clamped = clamp_rect(rect, full.width(), full.height())?;
     Ok(crop_rgba(&full, clamped))
@@ -886,8 +919,7 @@ fn capture_full_monitor_image(target: Option<MonitorPos>) -> Result<RgbaImage, A
         return Err(AppError::Capture("no monitors found".into()));
     }
     let monitor = pick_monitor(monitors, target)?;
-    monitor
-        .capture_image()
+    fresh_monitor_capture(&monitor)
         .map_err(|e| AppError::Capture(format!("capture image: {e}")))
 }
 
@@ -905,9 +937,7 @@ fn capture_front_window_image() -> Result<RgbaImage, AppError> {
             !minimized && !is_own_window(w) && !title.is_empty()
         })
         .ok_or_else(|| AppError::Capture("no capturable window found".into()))?;
-    target
-        .capture_image()
-        .map_err(|e| AppError::Capture(format!("capture window: {e}")))
+    fresh_monitor_capture(&target).map_err(|e| AppError::Capture(format!("capture window: {e}")))
 }
 
 /// Blocking capture: grab the monitor, crop to the clamped rect, encode PNG.
@@ -926,8 +956,7 @@ fn capture_region_png(rect: CaptureRect, monitor_id: Option<u32>) -> Result<Vec<
         None => primary_or_first(monitors)?,
     };
 
-    let full = monitor
-        .capture_image()
+    let full = fresh_monitor_capture(&monitor)
         .map_err(|e| AppError::Capture(format!("capture image: {e}")))?;
 
     let clamped = clamp_rect(rect, full.width(), full.height())?;

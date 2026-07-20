@@ -129,16 +129,28 @@ pub fn run() {
             register_capture_shortcut(app.handle());
             build_app_menu(app.handle())?;
             build_tray(app.handle())?;
-            // Warm up the overlay windows (hidden) so the first hotkey press
-            // shows them instantly rather than building webviews inline.
-            overlay::precreate_overlays(app.handle());
-            // Same warm-up for the toast so its first show is instant instead
-            // of paying the webview build + JS load cost inline on capture.
-            toast::precreate_toast(app.handle());
-            // Warm up the pin window (hidden) so the first pin is instant.
-            pin::precreate_pin(app.handle());
-            // Warm up the long-screenshot control window (hidden).
-            scroll::precreate_control(app.handle());
+            // Warm up the auxiliary windows (overlay/toast/pin/scroll) so their
+            // first show is instant. These build hidden webviews, which is slow;
+            // doing it INLINE here saturated the main thread on cold start,
+            // delaying the main webview's first paint (and thus `main_ready`) and
+            // early hotkey handling — the user saw the window appear only after
+            // the 4s fallback and the hotkey was dead for a while.
+            //
+            // Defer them off the synchronous setup critical path: queue on the
+            // main thread so they run AFTER `setup` returns and the event loop is
+            // pumping. Webview creation must happen on the main thread, so we use
+            // `run_on_main_thread` rather than a plain background thread. Every
+            // `show_*` path already builds its window on demand if the warm-up
+            // hasn't run yet, so this can never race a hotkey press.
+            {
+                let handle = app.handle().clone();
+                let _ = app.handle().run_on_main_thread(move || {
+                    overlay::precreate_overlays(&handle);
+                    toast::precreate_toast(&handle);
+                    pin::precreate_pin(&handle);
+                    scroll::precreate_control(&handle);
+                });
+            }
             // The main window is created hidden (see tauri.conf.json) so the
             // cold-start black flash — window shown before the heavy editor JS
             // bundle paints — is gone; the frontend calls `main_ready` once it
